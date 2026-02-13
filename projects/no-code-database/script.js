@@ -241,13 +241,13 @@ function renderMergeColumns() {
 
     const options = [];
     for (const col of base.columns || []) {
-        options.push({ id: `base:${col.id}`, label: `${base.name} / ${col.name}` });
+        options.push({ id: `base:${col.id}`, label: `${col.name}` });
 
         if (col.type === 'relation') {
             const targetTable = getTableById(col.relation?.tableId);
             if (targetTable) {
                 for (const targetCol of targetTable.columns || []) {
-                    options.push({ id: `rel:${col.id}:${targetCol.id}`, label: `${base.name} / ${col.name} → ${targetTable.name} / ${targetCol.name}` });
+                    options.push({ id: `rel:${col.id}:${targetCol.id}`, label: `${col.name} → ${targetCol.name}` });
                 }
             }
         }
@@ -274,13 +274,13 @@ function renderMergedTable() {
     const headers = selected.map(key => {
         if (key.startsWith('base:')) {
             const col = getColumnById(base, key.split(':')[1]);
-            return `${base.name} / ${col?.name || '?'}`;
+            return `${col?.name || '?'}`;
         }
         const [, relColId, targetColId] = key.split(':');
         const relCol = getColumnById(base, relColId);
         const tTable = getTableById(relCol?.relation?.tableId);
         const tCol = getColumnById(tTable, targetColId);
-        return `${base.name} / ${relCol?.name || '?'} → ${tTable?.name || '?'} / ${tCol?.name || '?'}`;
+        return `${relCol?.name || '?'} → ${tCol?.name || '?'}`;
     });
 
     const head = `<tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`;

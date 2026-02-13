@@ -129,7 +129,7 @@ if (isset($_GET['api']) && $_GET['api'] === '1') {
 
     <section class="card">
         <h2>4) Combined view (with linked data)</h2>
-        <p class="muted">Choose a main group, pick which columns to show, then preview merged data.</p>
+        <p class="muted">Choose which columns you want to see, then click “Show merged data”. Column names are simplified for easier reading.</p>
         <div class="row wrap-row">
             <select id="mergeBaseTable"></select>
             <button id="refreshMergeColumnsBtn" class="ghost">Refresh columns</button>
