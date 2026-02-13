@@ -31,9 +31,24 @@
 
             <label class="file-card">
                 <span class="file-card-title">Add extra PDFs (optional)</span>
-                <span class="file-card-desc">Use this to include PDFs outside the selected folder.</span>
+                <span class="file-card-desc">Each selection appends files; it won’t overwrite your previous extra picks.</span>
                 <input id="extraInput" type="file" accept="application/pdf,.pdf" multiple>
             </label>
+        </div>
+
+        <div class="selection-preview">
+            <div>
+                <h3>Selected folders</h3>
+                <div id="selectedFolders" class="tag-list">
+                    <span class="placeholder">No folder selected.</span>
+                </div>
+            </div>
+            <div>
+                <h3>Selected files</h3>
+                <ul id="selectedFilesList" class="selected-list">
+                    <li class="placeholder">No files selected yet.</li>
+                </ul>
+            </div>
         </div>
 
         <div class="toolbar">
@@ -49,30 +64,12 @@
     <section class="panel metrics" aria-live="polite">
         <h2>2) Summary</h2>
         <div class="metric-grid">
-            <article class="metric">
-                <p>All discovered PDFs</p>
-                <strong id="totalFiles">0</strong>
-            </article>
-            <article class="metric">
-                <p>Total pages (all)</p>
-                <strong id="totalPages">0</strong>
-            </article>
-            <article class="metric">
-                <p>Total size (all)</p>
-                <strong id="totalSize">0 KB</strong>
-            </article>
-            <article class="metric">
-                <p>Selected PDFs</p>
-                <strong id="selectedFiles">0</strong>
-            </article>
-            <article class="metric">
-                <p>Selected pages</p>
-                <strong id="selectedPages">0</strong>
-            </article>
-            <article class="metric">
-                <p>Selected size</p>
-                <strong id="selectedSize">0 KB</strong>
-            </article>
+            <article class="metric"><p>All discovered PDFs</p><strong id="totalFiles">0</strong></article>
+            <article class="metric"><p>Total pages (all)</p><strong id="totalPages">0</strong></article>
+            <article class="metric"><p>Total size (all)</p><strong id="totalSize">0 KB</strong></article>
+            <article class="metric"><p>Selected PDFs</p><strong id="selectedFiles">0</strong></article>
+            <article class="metric"><p>Selected pages</p><strong id="selectedPages">0</strong></article>
+            <article class="metric"><p>Selected size</p><strong id="selectedSize">0 KB</strong></article>
         </div>
     </section>
 
@@ -95,9 +92,7 @@
                 </tr>
                 </thead>
                 <tbody id="fileTableBody">
-                <tr>
-                    <td colspan="6" class="empty">Choose a folder and click “Scan & Build Summary”.</td>
-                </tr>
+                <tr><td colspan="6" class="empty">Choose files and click “Scan & Build Summary”.</td></tr>
                 </tbody>
             </table>
         </div>
