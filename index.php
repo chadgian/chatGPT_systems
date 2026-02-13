@@ -97,6 +97,16 @@
             </table>
         </div>
     </section>
+
+    <section class="panel ai-panel">
+        <div class="table-head">
+            <h2>4) AI Summary of selected files</h2>
+            <button type="button" id="aiSummaryBtn" class="primary">Generate AI summary</button>
+        </div>
+        <p id="aiStatus" class="status-text">Ready.</p>
+        <pre id="aiOutput" class="ai-output"></pre>
+    </section>
+
 </main>
 
 <script type="module" src="script.js"></script>

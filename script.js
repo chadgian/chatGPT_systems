@@ -22,9 +22,14 @@ const selectedPagesEl = document.getElementById('selectedPages');
 const selectedSizeEl = document.getElementById('selectedSize');
 const selectedCountLabel = document.getElementById('selectedCountLabel');
 
+const aiSummaryBtn = document.getElementById('aiSummaryBtn');
+const aiStatus = document.getElementById('aiStatus');
+const aiOutput = document.getElementById('aiOutput');
+
 let folderFiles = [];
 let extraFiles = [];
 let scannedRows = [];
+let scannedMap = new Map();
 
 function fileKey(file) {
     return `${file.name}|${file.size}|${file.lastModified}`;
@@ -45,8 +50,10 @@ function toPdfFiles(list) {
 
 function invalidateScan(message) {
     scannedRows = [];
+    scannedMap = new Map();
     tableBody.innerHTML = '<tr><td colspan="6" class="empty">Choose files and click “Scan & Build Summary”.</td></tr>';
     updateMetrics();
+    aiOutput.textContent = 'Run a scan first, then click “Generate AI summary”.';
     if (message) {
         statusText.textContent = message;
     }
@@ -95,12 +102,61 @@ function refreshSelectionPreview() {
     renderSelectedFiles();
 }
 
-async function getPageCount(file) {
+async function extractTextSample(pdf, maxPages = 2) {
+    const pages = Math.min(maxPages, pdf.numPages || 0);
+    let text = '';
+
+    for (let i = 1; i <= pages; i += 1) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map(item => item.str).join(' ');
+        text += ` ${pageText}`;
+    }
+
+    return text.trim();
+}
+
+function localHeuristicSummary(scannedEntries) {
+    if (scannedEntries.length === 0) {
+        return 'No scanned files available for summary.';
+    }
+
+    const allText = scannedEntries.map(entry => entry.textSample).join(' ').toLowerCase();
+    const tokens = allText
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(word => word.length > 4 && !['about', 'there', 'their', 'which', 'these', 'those', 'would', 'could', 'should', 'where', 'pages', 'document'].includes(word));
+
+    const freq = new Map();
+    for (const token of tokens) {
+        freq.set(token, (freq.get(token) || 0) + 1);
+    }
+
+    const topKeywords = Array.from(freq.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([word]) => word);
+
+    const previewLines = scannedEntries.slice(0, 5).map(entry => `- ${entry.name}: ${entry.textSample.slice(0, 140) || 'No readable text sample.'}`);
+
+    return [
+        `Local AI-style summary (heuristic):`,
+        `The selected PDF collection appears to focus on: ${topKeywords.join(', ') || 'mixed topics'}.
+`,
+        `Top file previews:`,
+        ...previewLines,
+        '',
+        'Tip: For a stronger summary, connect this page to a remote LLM endpoint and send extracted text samples.',
+    ].join('\n');
+}
+
+async function getPageCountAndText(file) {
     const buffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
     const pages = pdf.numPages || 0;
+    const textSample = await extractTextSample(pdf, 2);
     pdf.destroy();
-    return pages;
+    return { pages, textSample };
 }
 
 async function scanFiles() {
@@ -127,19 +183,28 @@ async function scanFiles() {
 
     const all = Array.from(merged.values());
     const rows = [];
+    const localMap = new Map();
 
     for (let i = 0; i < all.length; i += 1) {
         const { file, source } = all[i];
         let pages = 0;
+        let textSample = '';
+
         try {
-            pages = await getPageCount(file);
+            const result = await getPageCountAndText(file);
+            pages = result.pages;
+            textSample = result.textSample;
         } catch {
             pages = 0;
+            textSample = '';
         }
+
+        const key = fileKey(file);
+        localMap.set(key, { name: file.name, source, pages, textSample, size: file.size });
 
         rows.push({
             id: `row-${i}`,
-            key: fileKey(file),
+            key,
             include: true,
             name: file.name,
             source,
@@ -152,8 +217,10 @@ async function scanFiles() {
     }
 
     scannedRows = rows;
+    scannedMap = localMap;
     renderTable();
     updateMetrics();
+    aiOutput.textContent = 'Scan complete. Click “Generate AI summary” to summarize selected files.';
     statusText.textContent = `Scan complete. ${rows.length} PDF file(s) ready.`;
     scanBtn.disabled = false;
 }
@@ -197,6 +264,30 @@ function updateMetrics() {
     selectedCountLabel.textContent = `${selected.length} of ${totalFiles} selected`;
 }
 
+async function generateAiSummary() {
+    const selectedEntries = scannedRows
+        .filter(row => row.include)
+        .map(row => scannedMap.get(row.key))
+        .filter(Boolean);
+
+    if (selectedEntries.length === 0) {
+        aiStatus.textContent = 'Select at least one scanned PDF to summarize.';
+        aiOutput.textContent = 'No selected files available for summary.';
+        return;
+    }
+
+    aiStatus.textContent = 'Generating summary...';
+    aiSummaryBtn.disabled = true;
+
+    try {
+        const summary = localHeuristicSummary(selectedEntries);
+        aiOutput.textContent = summary;
+        aiStatus.textContent = `Summary generated for ${selectedEntries.length} selected PDF(s).`;
+    } finally {
+        aiSummaryBtn.disabled = false;
+    }
+}
+
 function escapeHtml(value) {
     return String(value)
         .replaceAll('&', '&amp;')
@@ -216,9 +307,7 @@ folderInput.addEventListener('change', () => {
 
 extraInput.addEventListener('change', () => {
     const newlySelected = toPdfFiles(extraInput.files);
-    if (newlySelected.length === 0) {
-        return;
-    }
+    if (newlySelected.length === 0) return;
 
     const seen = new Set(extraFiles.map(fileKey));
     for (const file of newlySelected) {
@@ -261,6 +350,8 @@ selectedFilesList.addEventListener('click', (event) => {
 });
 
 scanBtn.addEventListener('click', scanFiles);
+aiSummaryBtn.addEventListener('click', generateAiSummary);
+
 selectAllBtn.addEventListener('click', () => {
     scannedRows = scannedRows.map(row => ({ ...row, include: true }));
     renderTable();
@@ -295,3 +386,4 @@ resetBtn.addEventListener('click', () => {
 
 refreshSelectionPreview();
 updateMetrics();
+aiOutput.textContent = 'Run a scan first, then click “Generate AI summary”.';
