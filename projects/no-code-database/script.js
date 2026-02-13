@@ -1,4 +1,4 @@
-const state = { tables: [], relations: [], selectedTableId: null };
+const state = { tables: [], relations: [], selectedTableId: null, editingRowId: null };
 
 const saveStateBadge = document.getElementById('saveState');
 const tableNameInput = document.getElementById('tableNameInput');
@@ -35,6 +35,7 @@ async function loadWorkspace() {
     state.tables = Array.isArray(data.tables) ? data.tables : [];
     state.relations = Array.isArray(data.relations) ? data.relations : [];
     state.selectedTableId = state.tables[0]?.id || null;
+    state.editingRowId = null;
     renderAll();
 }
 
@@ -57,29 +58,28 @@ function parseDropdownOptions(raw) {
 }
 
 function displayValue(column, value) {
-    if (column.type !== 'relation') {
-        return String(value ?? '');
-    }
+    if (column.type !== 'relation') return String(value ?? '');
 
     const relation = column.relation || {};
     const targetTable = getTableById(relation.tableId);
-    if (!targetTable) return '';
-    const targetRow = (targetTable.rows || []).find(r => r.id === value);
-    if (!targetRow) return '';
+    const targetRow = (targetTable?.rows || []).find(r => r.id === value);
     const targetCol = getColumnById(targetTable, relation.columnId);
-    if (!targetCol) return '';
-    return String(targetRow.values?.[targetCol.id] ?? '');
+    return String(targetRow?.values?.[targetCol?.id] ?? '');
 }
 
 function tableOptions(selectedId = '', includePrompt = false) {
-    const opts = state.tables.map(table => `<option value="${table.id}" ${table.id === selectedId ? 'selected' : ''}>${escapeHtml(table.name)}</option>`).join('');
+    const opts = state.tables
+        .map(table => `<option value="${table.id}" ${table.id === selectedId ? 'selected' : ''}>${escapeHtml(table.name)}</option>`)
+        .join('');
     return includePrompt ? `<option value="">Select group</option>${opts}` : opts;
 }
 
 function relationColumnOptions(tableId, selectedId = '') {
     const table = getTableById(tableId);
     if (!table) return '<option value="">Select field</option>';
-    const opts = (table.columns || []).map(col => `<option value="${col.id}" ${col.id === selectedId ? 'selected' : ''}>${escapeHtml(col.name)}</option>`).join('');
+    const opts = (table.columns || [])
+        .map(col => `<option value="${col.id}" ${col.id === selectedId ? 'selected' : ''}>${escapeHtml(col.name)}</option>`)
+        .join('');
     return `<option value="">Select field</option>${opts}`;
 }
 
@@ -96,6 +96,11 @@ function syncTypeUi() {
         relationTableInput.value = '';
         relationColumnInput.innerHTML = '<option value="">Select field</option>';
     }
+}
+
+function cancelEditingRow() {
+    state.editingRowId = null;
+    renderFieldsAndRecords();
 }
 
 function renderTableList() {
@@ -162,13 +167,17 @@ function renderRowForm(table) {
         return;
     }
 
+    const editingRow = (table.rows || []).find(row => row.id === state.editingRowId) || null;
+
     const fields = table.columns.map(column => {
+        const currentValue = editingRow?.values?.[column.id] ?? '';
+
         if (column.type === 'yesno') {
-            return `<label>${escapeHtml(column.name)}<select name="${column.id}"><option value="Yes">Yes</option><option value="No">No</option></select></label>`;
+            return `<label>${escapeHtml(column.name)}<select name="${column.id}"><option value="Yes" ${currentValue === 'Yes' ? 'selected' : ''}>Yes</option><option value="No" ${currentValue === 'No' ? 'selected' : ''}>No</option></select></label>`;
         }
 
         if (column.type === 'dropdown') {
-            const options = (column.options || []).map(opt => `<option value="${escapeHtml(opt)}">${escapeHtml(opt)}</option>`).join('');
+            const options = (column.options || []).map(opt => `<option value="${escapeHtml(opt)}" ${String(currentValue) === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`).join('');
             return `<label>${escapeHtml(column.name)}<select name="${column.id}">${options}</select></label>`;
         }
 
@@ -177,16 +186,23 @@ function renderRowForm(table) {
             const targetCol = getColumnById(targetTable, column.relation?.columnId);
             const options = (targetTable?.rows || []).map(row => {
                 const label = targetCol ? row.values?.[targetCol.id] : row.id;
-                return `<option value="${row.id}">${escapeHtml(String(label ?? '(empty)'))}</option>`;
+                return `<option value="${row.id}" ${currentValue === row.id ? 'selected' : ''}>${escapeHtml(String(label ?? '(empty)'))}</option>`;
             }).join('');
             return `<label>${escapeHtml(column.name)}<select name="${column.id}"><option value="">Select linked record</option>${options}</select></label>`;
         }
 
         const typeMap = { number: 'number', date: 'date', text: 'text' };
-        return `<label>${escapeHtml(column.name)}<input type="${typeMap[column.type] || 'text'}" name="${column.id}" /></label>`;
+        return `<label>${escapeHtml(column.name)}<input type="${typeMap[column.type] || 'text'}" name="${column.id}" value="${escapeHtml(String(currentValue))}" /></label>`;
     }).join('');
 
-    rowForm.innerHTML = `${fields}<button type="submit">Add record</button>`;
+    rowForm.innerHTML = `${fields}
+        <div class="row wrap-row">
+            <button type="submit">${editingRow ? 'Update record' : 'Add record'}</button>
+            ${editingRow ? '<button type="button" class="ghost" id="cancelEditRowBtn">Cancel edit</button>' : ''}
+        </div>`;
+
+    const cancelBtn = document.getElementById('cancelEditRowBtn');
+    if (cancelBtn) cancelBtn.addEventListener('click', cancelEditingRow);
 }
 
 function renderDataTable(table) {
@@ -202,7 +218,10 @@ function renderDataTable(table) {
         ? `<tr><td colspan="${columns.length + 1}">No records yet.</td></tr>`
         : rows.map(row => {
             const cells = columns.map(col => `<td>${escapeHtml(displayValue(col, row.values?.[col.id] ?? ''))}</td>`).join('');
-            return `<tr>${cells}<td><button class="danger" data-delete-row="${row.id}">Delete</button></td></tr>`;
+            return `<tr>${cells}<td>
+                <button class="ghost" data-edit-row="${row.id}">Edit</button>
+                <button class="danger" data-delete-row="${row.id}">Delete</button>
+            </td></tr>`;
         }).join('');
 
     dataTable.innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
@@ -234,17 +253,9 @@ function renderMergeColumns() {
         }
     }
 
-    if (!options.length) {
-        mergeColumns.innerHTML = '<p class="muted">No columns available.</p>';
-        return;
-    }
-
-    mergeColumns.innerHTML = options.map((opt, idx) => `
-        <label class="chip-option">
-            <input type="checkbox" value="${opt.id}" ${idx < 4 ? 'checked' : ''}>
-            ${escapeHtml(opt.label)}
-        </label>
-    `).join('');
+    mergeColumns.innerHTML = options.length
+        ? options.map((opt, idx) => `<label class="chip-option"><input type="checkbox" value="${opt.id}" ${idx < 4 ? 'checked' : ''}>${escapeHtml(opt.label)}</label>`).join('')
+        : '<p class="muted">No columns available.</p>';
 }
 
 function renderMergedTable() {
@@ -277,16 +288,13 @@ function renderMergedTable() {
         const cells = selected.map(key => {
             if (key.startsWith('base:')) {
                 const col = getColumnById(base, key.split(':')[1]);
-                const value = row.values?.[col?.id] ?? '';
-                return `<td>${escapeHtml(displayValue(col, value))}</td>`;
+                return `<td>${escapeHtml(displayValue(col, row.values?.[col?.id] ?? ''))}</td>`;
             }
-
             const [, relColId, targetColId] = key.split(':');
             const relCol = getColumnById(base, relColId);
             const tTable = getTableById(relCol?.relation?.tableId);
             const linkedRow = (tTable?.rows || []).find(r => r.id === (row.values?.[relColId] ?? ''));
-            const value = linkedRow?.values?.[targetColId] ?? '';
-            return `<td>${escapeHtml(String(value))}</td>`;
+            return `<td>${escapeHtml(String(linkedRow?.values?.[targetColId] ?? ''))}</td>`;
         }).join('');
         return `<tr>${cells}</tr>`;
     }).join('');
@@ -315,6 +323,7 @@ addTableBtn.addEventListener('click', async () => {
     const table = { id: uid('table'), name, columns: [], rows: [] };
     state.tables.push(table);
     state.selectedTableId = table.id;
+    state.editingRowId = null;
     tableNameInput.value = '';
     renderAll();
     await persist();
@@ -324,6 +333,7 @@ tableList.addEventListener('click', async event => {
     const pick = event.target.closest('[data-pick-table]');
     if (pick) {
         state.selectedTableId = pick.dataset.pickTable;
+        state.editingRowId = null;
         renderAll();
         return;
     }
@@ -346,19 +356,19 @@ tableList.addEventListener('click', async event => {
         state.tables = state.tables.filter(t => t.id !== tableId);
 
         for (const table of state.tables) {
-            table.columns = (table.columns || []).filter(col => !(col.type === 'relation' && col.relation?.tableId === tableId));
+            const removedRelationColumns = new Set(
+                (table.columns || []).filter(col => col.type === 'relation' && col.relation?.tableId === tableId).map(col => col.id)
+            );
+            table.columns = (table.columns || []).filter(col => !removedRelationColumns.has(col.id));
             table.rows = (table.rows || []).map(row => {
                 const values = { ...(row.values || {}) };
-                for (const col of table.columns || []) {
-                    if (col.type === 'relation' && col.relation?.tableId === tableId) {
-                        delete values[col.id];
-                    }
-                }
+                for (const colId of removedRelationColumns) delete values[colId];
                 return { ...row, values };
             });
         }
 
         if (state.selectedTableId === tableId) state.selectedTableId = state.tables[0]?.id || null;
+        state.editingRowId = null;
         renderAll();
         await persist();
     }
@@ -379,9 +389,7 @@ addColumnBtn.addEventListener('click', async () => {
     }
 
     if (type === 'relation') {
-        if (!relationTableInput.value || !relationColumnInput.value) {
-            return alert('Please choose the linked group and field.');
-        }
+        if (!relationTableInput.value || !relationColumnInput.value) return alert('Please choose the linked group and field.');
         column.relation = { tableId: relationTableInput.value, columnId: relationColumnInput.value };
     }
 
@@ -409,6 +417,7 @@ columnList.addEventListener('click', async event => {
         return { ...row, values };
     });
 
+    state.editingRowId = null;
     renderAll();
     await persist();
 });
@@ -422,18 +431,34 @@ rowForm.addEventListener('submit', async event => {
     const values = {};
     for (const col of table.columns) values[col.id] = String(formData.get(col.id) ?? '');
 
-    table.rows.push({ id: uid('row'), values });
+    if (state.editingRowId) {
+        const existing = (table.rows || []).find(r => r.id === state.editingRowId);
+        if (existing) existing.values = values;
+        state.editingRowId = null;
+    } else {
+        table.rows.push({ id: uid('row'), values });
+    }
+
     renderAll();
     await persist();
 });
 
 dataTable.addEventListener('click', async event => {
+    const edit = event.target.closest('[data-edit-row]');
+    if (edit) {
+        state.editingRowId = edit.dataset.editRow;
+        renderFieldsAndRecords();
+        return;
+    }
+
     const del = event.target.closest('[data-delete-row]');
     if (!del) return;
+
     const table = selectedTable();
     if (!table) return;
-
-    table.rows = table.rows.filter(r => r.id !== del.dataset.deleteRow);
+    const rowId = del.dataset.deleteRow;
+    table.rows = table.rows.filter(r => r.id !== rowId);
+    if (state.editingRowId === rowId) state.editingRowId = null;
     renderAll();
     await persist();
 });
