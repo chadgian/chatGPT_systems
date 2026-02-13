@@ -187,7 +187,7 @@ function renderTable() {
     }
 
     tableBody.innerHTML = scannedRows.map(row => `
-        <tr data-row-id="${row.id}">
+        <tr data-row-id="${row.id}" class="${row.include ? 'is-selected' : ''}">
             <td><input type="checkbox" data-id="${row.id}" ${row.include ? 'checked' : ''}></td>
             <td>${escapeHtml(row.name)}</td>
             <td>${escapeHtml(row.source)}</td>
@@ -298,6 +298,8 @@ tableBody.addEventListener('click', (event) => {
     if (checkbox) {
         const id = checkbox.dataset.id;
         scannedRows = scannedRows.map(row => row.id === id ? { ...row, include: checkbox.checked } : row);
+        const parentRow = checkbox.closest('tr[data-row-id]');
+        if (parentRow) parentRow.classList.toggle('is-selected', checkbox.checked);
         updateMetrics();
         return;
     }
@@ -311,6 +313,7 @@ tableBody.addEventListener('click', (event) => {
     row.include = !row.include;
     const rowCheckbox = rowEl.querySelector('input[type="checkbox"][data-id]');
     if (rowCheckbox) rowCheckbox.checked = row.include;
+    rowEl.classList.toggle('is-selected', row.include);
     updateMetrics();
 });
 
