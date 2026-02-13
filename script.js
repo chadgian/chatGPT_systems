@@ -1,6 +1,4 @@
 import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.min.mjs';
-import { createWorker } from 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.esm.min.js';
-
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.worker.min.mjs';
 
 const folderInput = document.getElementById('folderInput');
@@ -32,6 +30,7 @@ let extraFiles = [];
 let scannedRows = [];
 let scannedMap = new Map();
 let ocrWorker = null;
+let createWorkerFn = null;
 
 function fileKey(file) {
     return `${file.name}|${file.size}|${file.lastModified}`;
@@ -106,8 +105,40 @@ function refreshSelectionPreview() {
     renderSelectedFiles();
 }
 
+async function loadCreateWorker() {
+    if (createWorkerFn) return createWorkerFn;
+
+    const urls = [
+        'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.esm.min.js',
+        'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/+esm',
+    ];
+
+    for (const url of urls) {
+        try {
+            const mod = await import(url);
+            if (typeof mod.createWorker === 'function') {
+                createWorkerFn = mod.createWorker;
+                return createWorkerFn;
+            }
+            if (mod.default && typeof mod.default.createWorker === 'function') {
+                createWorkerFn = mod.default.createWorker.bind(mod.default);
+                return createWorkerFn;
+            }
+            if (typeof mod.default === 'function') {
+                createWorkerFn = mod.default;
+                return createWorkerFn;
+            }
+        } catch {
+            // Try next CDN variant.
+        }
+    }
+
+    throw new Error('Unable to load Tesseract createWorker from CDN modules.');
+}
+
 async function getOcrWorker() {
     if (ocrWorker) return ocrWorker;
+    const createWorker = await loadCreateWorker();
     ocrWorker = await createWorker('eng');
     return ocrWorker;
 }
