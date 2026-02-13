@@ -40,6 +40,7 @@
             <button type="button" id="scanBtn" class="primary">Scan & Build Summary</button>
             <button type="button" id="selectAllBtn">Select all</button>
             <button type="button" id="selectNoneBtn">Clear all</button>
+            <button type="button" id="resetBtn" class="danger">Reset selection</button>
             <input id="searchInput" type="search" placeholder="Search files...">
         </div>
         <p id="statusText" class="status-text">No folder selected yet.</p>

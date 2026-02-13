@@ -8,6 +8,8 @@ const scanBtn = document.getElementById('scanBtn');
 const selectAllBtn = document.getElementById('selectAllBtn');
 const selectNoneBtn = document.getElementById('selectNoneBtn');
 const searchInput = document.getElementById('searchInput');
+
+const resetBtn = document.getElementById('resetBtn');
 const statusText = document.getElementById('statusText');
 const tableBody = document.getElementById('fileTableBody');
 
@@ -182,5 +184,17 @@ tableBody.addEventListener('change', (event) => {
 
     const id = target.dataset.id;
     scannedRows = scannedRows.map(row => row.id === id ? { ...row, include: target.checked } : row);
+    updateMetrics();
+});
+
+
+resetBtn.addEventListener('click', () => {
+    folderInput.value = '';
+    extraInput.value = '';
+    searchInput.value = '';
+    scannedRows = [];
+
+    tableBody.innerHTML = '<tr><td colspan="6" class="empty">Choose a folder and click “Scan & Build Summary”.</td></tr>';
+    statusText.textContent = 'Selections reset. Choose a new folder and/or extra files.';
     updateMetrics();
 });

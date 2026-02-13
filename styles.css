@@ -116,7 +116,7 @@ input[type="search"] {
 
 .toolbar {
     display: grid;
-    grid-template-columns: auto auto auto 1fr;
+    grid-template-columns: auto auto auto auto 1fr;
     gap: 0.55rem;
     margin-top: 0.9rem;
 }
@@ -225,4 +225,11 @@ th {
     .toolbar input[type="search"] {
         grid-column: span 2;
     }
+}
+
+
+button.danger {
+    border-color: #f2c2c7;
+    background: #fff5f5;
+    color: #a22133;
 }
