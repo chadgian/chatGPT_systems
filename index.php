@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PDF Folder Summary Studio</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
 </head>
 <body>
 <main class="app-shell">
@@ -14,7 +15,7 @@
             <h1>Scan a folder, then optionally add extra PDF files</h1>
             <p class="subtitle">
                 Choose a local folder from your device, automatically discover all PDFs, and generate folder-wide metrics
-                like total files, total pages, and total size. You can then attach more PDFs to include in the same report.
+                like total files, total pages, and total size.
             </p>
         </div>
         <div class="hero-badge">No server upload required for scanning</div>
@@ -39,15 +40,11 @@
         <div class="selection-preview">
             <div>
                 <h3>Selected folders</h3>
-                <div id="selectedFolders" class="tag-list">
-                    <span class="placeholder">No folder selected.</span>
-                </div>
+                <div id="selectedFolders" class="tag-list"><span class="placeholder">No folder selected.</span></div>
             </div>
             <div>
                 <h3>Selected files</h3>
-                <ul id="selectedFilesList" class="selected-list">
-                    <li class="placeholder">No files selected yet.</li>
-                </ul>
+                <ul id="selectedFilesList" class="selected-list"><li class="placeholder">No files selected yet.</li></ul>
             </div>
         </div>
 
@@ -56,7 +53,7 @@
             <button type="button" id="selectAllBtn">Select all</button>
             <button type="button" id="selectNoneBtn">Clear all</button>
             <button type="button" id="resetBtn" class="danger">Reset selection</button>
-            <input id="searchInput" type="search" placeholder="Search files...">
+            <input id="searchInput" type="search" placeholder="Quick filter table rows...">
         </div>
         <p id="statusText" class="status-text">No folder selected yet.</p>
     </section>
@@ -80,7 +77,7 @@
         </div>
 
         <div class="table-wrap">
-            <table>
+            <table id="fileTable">
                 <thead>
                 <tr>
                     <th>Include</th>
@@ -98,18 +95,10 @@
             </table>
         </div>
     </section>
-
-    <section class="panel ai-panel">
-        <div class="table-head">
-            <h2>4) AI Summary of selected files</h2>
-            <button type="button" id="aiSummaryBtn" class="primary">Generate AI summary</button>
-        </div>
-        <p id="aiStatus" class="status-text">Ready.</p>
-        <pre id="aiOutput" class="ai-output"></pre>
-    </section>
-
 </main>
 
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
 <script type="module" src="script.js"></script>
 </body>
 </html>

@@ -1,4 +1,5 @@
 import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.min.mjs';
+
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.worker.min.mjs';
 
 const folderInput = document.getElementById('folderInput');
@@ -21,16 +22,10 @@ const selectedPagesEl = document.getElementById('selectedPages');
 const selectedSizeEl = document.getElementById('selectedSize');
 const selectedCountLabel = document.getElementById('selectedCountLabel');
 
-const aiSummaryBtn = document.getElementById('aiSummaryBtn');
-const aiStatus = document.getElementById('aiStatus');
-const aiOutput = document.getElementById('aiOutput');
-
 let folderFiles = [];
 let extraFiles = [];
 let scannedRows = [];
-let scannedMap = new Map();
-let ocrWorker = null;
-let createWorkerFn = null;
+let dataTable = null;
 
 function fileKey(file) {
     return `${file.name}|${file.size}|${file.lastModified}`;
@@ -55,10 +50,9 @@ function toPdfFiles(list) {
 
 function invalidateScan(message) {
     scannedRows = [];
-    scannedMap = new Map();
+    destroyDataTable();
     tableBody.innerHTML = '<tr><td colspan="7" class="empty">Choose files and click “Scan & Build Summary”.</td></tr>';
     updateMetrics();
-    aiOutput.textContent = 'Run a scan first, then click “Generate AI summary”.';
     if (message) statusText.textContent = message;
 }
 
@@ -105,115 +99,12 @@ function refreshSelectionPreview() {
     renderSelectedFiles();
 }
 
-async function loadCreateWorker() {
-    if (createWorkerFn) return createWorkerFn;
-
-    const urls = [
-        'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.esm.min.js',
-        'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/+esm',
-    ];
-
-    for (const url of urls) {
-        try {
-            const mod = await import(url);
-            if (typeof mod.createWorker === 'function') {
-                createWorkerFn = mod.createWorker;
-                return createWorkerFn;
-            }
-            if (mod.default && typeof mod.default.createWorker === 'function') {
-                createWorkerFn = mod.default.createWorker.bind(mod.default);
-                return createWorkerFn;
-            }
-            if (typeof mod.default === 'function') {
-                createWorkerFn = mod.default;
-                return createWorkerFn;
-            }
-        } catch {
-            // Try next CDN variant.
-        }
-    }
-
-    throw new Error('Unable to load Tesseract createWorker from CDN modules.');
-}
-
-async function getOcrWorker() {
-    if (ocrWorker) return ocrWorker;
-    const createWorker = await loadCreateWorker();
-    ocrWorker = await createWorker('eng');
-    return ocrWorker;
-}
-
-async function extractTextFromPage(page) {
-    const textContent = await page.getTextContent();
-    const text = textContent.items.map(item => item.str).join(' ').trim();
-    if (text.length > 40) return { text, method: 'text' };
-
-    const viewport = page.getViewport({ scale: 1.5 });
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    await page.render({ canvasContext: context, viewport }).promise;
-
-    const worker = await getOcrWorker();
-    const {
-        data: { text: ocrText },
-    } = await worker.recognize(canvas);
-    return { text: (ocrText || '').trim(), method: 'ocr' };
-}
-
-async function extractTextSample(pdf, maxPages = 2) {
-    const pages = Math.min(maxPages, pdf.numPages || 0);
-    let text = '';
-    let usedOcr = false;
-
-    for (let i = 1; i <= pages; i += 1) {
-        const page = await pdf.getPage(i);
-        const result = await extractTextFromPage(page);
-        if (result.method === 'ocr') usedOcr = true;
-        text += ` ${result.text}`;
-    }
-
-    return { text: text.trim(), usedOcr };
-}
-
-function localHeuristicSummary(scannedEntries) {
-    if (scannedEntries.length === 0) return 'No scanned files available for summary.';
-
-    const allText = scannedEntries.map(entry => entry.textSample).join(' ').toLowerCase();
-    const tokens = allText
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .split(/\s+/)
-        .filter(word => word.length > 4 && !['about', 'there', 'their', 'which', 'these', 'those', 'would', 'could', 'should', 'where', 'pages', 'document'].includes(word));
-
-    const freq = new Map();
-    for (const token of tokens) freq.set(token, (freq.get(token) || 0) + 1);
-
-    const topKeywords = Array.from(freq.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 8)
-        .map(([word]) => word);
-
-    const previewLines = scannedEntries.slice(0, 8).map(entry =>
-        `- ${entry.name} (${entry.dateLabel}${entry.usedOcr ? ', OCR used' : ''}): ${entry.textSample.slice(0, 140) || 'No readable text sample.'}`
-    );
-
-    return [
-        'Local AI-style summary (heuristic + OCR fallback):',
-        `The selected PDF collection appears to focus on: ${topKeywords.join(', ') || 'mixed topics'}.`,
-        '',
-        'File highlights:',
-        ...previewLines,
-    ].join('\n');
-}
-
-async function getPageCountAndText(file) {
+async function getPageCount(file) {
     const buffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
     const pages = pdf.numPages || 0;
-    const sample = await extractTextSample(pdf, 2);
     pdf.destroy();
-    return { pages, textSample: sample.text, usedOcr: sample.usedOcr };
+    return pages;
 }
 
 async function scanFiles() {
@@ -222,7 +113,7 @@ async function scanFiles() {
         return;
     }
 
-    statusText.textContent = 'Scanning PDFs, extracting text, and running OCR when needed...';
+    statusText.textContent = 'Scanning PDFs and counting pages...';
     scanBtn.disabled = true;
 
     const merged = new Map();
@@ -234,36 +125,25 @@ async function scanFiles() {
 
     const all = Array.from(merged.values());
     const rows = [];
-    const localMap = new Map();
 
     for (let i = 0; i < all.length; i += 1) {
         const { file, source } = all[i];
         let pages = 0;
-        let textSample = '';
-        let usedOcr = false;
-
         try {
-            const result = await getPageCountAndText(file);
-            pages = result.pages;
-            textSample = result.textSample;
-            usedOcr = result.usedOcr;
+            pages = await getPageCount(file);
         } catch {
             pages = 0;
         }
 
-        const key = fileKey(file);
-        const dateLabel = formatDate(file.lastModified);
-        localMap.set(key, { name: file.name, source, pages, textSample, size: file.size, dateLabel, usedOcr });
-
         rows.push({
             id: `row-${i}`,
-            key,
+            key: fileKey(file),
             include: true,
             name: file.name,
             source,
             size: file.size,
             pages,
-            dateLabel,
+            dateLabel: formatDate(file.lastModified),
             path: file.webkitRelativePath || '(extra file)',
         });
 
@@ -271,25 +151,43 @@ async function scanFiles() {
     }
 
     scannedRows = rows;
-    scannedMap = localMap;
     renderTable();
     updateMetrics();
-    aiOutput.textContent = 'Scan complete. Click “Generate AI summary” to summarize selected files.';
     statusText.textContent = `Scan complete. ${rows.length} PDF file(s) ready.`;
     scanBtn.disabled = false;
 }
 
-function renderTable() {
-    const term = searchInput.value.toLowerCase().trim();
-    const visible = scannedRows.filter(row => !term || [row.name, row.path, row.source, row.dateLabel].join(' ').toLowerCase().includes(term));
+function destroyDataTable() {
+    if (dataTable) {
+        dataTable.destroy();
+        dataTable = null;
+    }
+}
 
-    if (visible.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="7" class="empty">No files match your search.</td></tr>';
+function initDataTable() {
+    if (typeof window.jQuery === 'undefined' || typeof window.jQuery.fn.DataTable === 'undefined') {
         return;
     }
 
-    tableBody.innerHTML = visible.map(row => `
-        <tr>
+    destroyDataTable();
+    dataTable = window.jQuery('#fileTable').DataTable({
+        paging: true,
+        pageLength: 10,
+        order: [[1, 'asc']],
+        columnDefs: [{ orderable: false, targets: 0 }],
+    });
+}
+
+function renderTable() {
+    destroyDataTable();
+
+    if (scannedRows.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="7" class="empty">No scanned files yet.</td></tr>';
+        return;
+    }
+
+    tableBody.innerHTML = scannedRows.map(row => `
+        <tr data-row-id="${row.id}">
             <td><input type="checkbox" data-id="${row.id}" ${row.include ? 'checked' : ''}></td>
             <td>${escapeHtml(row.name)}</td>
             <td>${escapeHtml(row.source)}</td>
@@ -299,6 +197,15 @@ function renderTable() {
             <td>${escapeHtml(row.path)}</td>
         </tr>
     `).join('');
+
+    initDataTable();
+    applyQuickSearch();
+}
+
+function applyQuickSearch() {
+    if (dataTable) {
+        dataTable.search(searchInput.value || '').draw();
+    }
 }
 
 function updateMetrics() {
@@ -317,24 +224,6 @@ function updateMetrics() {
     selectedPagesEl.textContent = `${selectedPages}`;
     selectedSizeEl.textContent = formatKB(selectedSize);
     selectedCountLabel.textContent = `${selected.length} of ${totalFiles} selected`;
-}
-
-async function generateAiSummary() {
-    const selectedEntries = scannedRows.filter(row => row.include).map(row => scannedMap.get(row.key)).filter(Boolean);
-    if (selectedEntries.length === 0) {
-        aiStatus.textContent = 'Select at least one scanned PDF to summarize.';
-        aiOutput.textContent = 'No selected files available for summary.';
-        return;
-    }
-
-    aiStatus.textContent = 'Generating summary...';
-    aiSummaryBtn.disabled = true;
-    try {
-        aiOutput.textContent = localHeuristicSummary(selectedEntries);
-        aiStatus.textContent = `Summary generated for ${selectedEntries.length} selected PDF(s).`;
-    } finally {
-        aiSummaryBtn.disabled = false;
-    }
 }
 
 function escapeHtml(value) {
@@ -389,7 +278,6 @@ selectedFilesList.addEventListener('click', (event) => {
 });
 
 scanBtn.addEventListener('click', scanFiles);
-aiSummaryBtn.addEventListener('click', generateAiSummary);
 
 selectAllBtn.addEventListener('click', () => {
     scannedRows = scannedRows.map(row => ({ ...row, include: true }));
@@ -403,17 +291,30 @@ selectNoneBtn.addEventListener('click', () => {
     updateMetrics();
 });
 
-searchInput.addEventListener('input', renderTable);
+searchInput.addEventListener('input', applyQuickSearch);
 
-tableBody.addEventListener('change', (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement) || target.type !== 'checkbox') return;
-    const id = target.dataset.id;
-    scannedRows = scannedRows.map(row => row.id === id ? { ...row, include: target.checked } : row);
+tableBody.addEventListener('click', (event) => {
+    const checkbox = event.target.closest('input[type="checkbox"][data-id]');
+    if (checkbox) {
+        const id = checkbox.dataset.id;
+        scannedRows = scannedRows.map(row => row.id === id ? { ...row, include: checkbox.checked } : row);
+        updateMetrics();
+        return;
+    }
+
+    const rowEl = event.target.closest('tr[data-row-id]');
+    if (!rowEl) return;
+    const id = rowEl.dataset.rowId;
+    const row = scannedRows.find(r => r.id === id);
+    if (!row) return;
+
+    row.include = !row.include;
+    const rowCheckbox = rowEl.querySelector('input[type="checkbox"][data-id]');
+    if (rowCheckbox) rowCheckbox.checked = row.include;
     updateMetrics();
 });
 
-resetBtn.addEventListener('click', async () => {
+resetBtn.addEventListener('click', () => {
     folderInput.value = '';
     extraInput.value = '';
     searchInput.value = '';
@@ -421,12 +322,7 @@ resetBtn.addEventListener('click', async () => {
     extraFiles = [];
     refreshSelectionPreview();
     invalidateScan('Selections reset. Choose a new folder and/or extra files.');
-    if (ocrWorker) {
-        await ocrWorker.terminate();
-        ocrWorker = null;
-    }
 });
 
 refreshSelectionPreview();
 updateMetrics();
-aiOutput.textContent = 'Run a scan first, then click “Generate AI summary”.';
