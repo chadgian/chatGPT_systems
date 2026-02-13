@@ -94,8 +94,12 @@ if (isset($_GET['api']) && $_GET['api'] === '1') {
                     <option value="number">Number</option>
                     <option value="date">Date</option>
                     <option value="yesno">Yes / No</option>
+                    <option value="dropdown">Dropdown list</option>
                 </select>
                 <button id="addColumnBtn">Add field</button>
+            </div>
+            <div class="row" id="dropdownOptionsRow" style="display:none;">
+                <input id="dropdownOptionsInput" type="text" placeholder="Dropdown choices (comma-separated, example: New, Processing, Done)">
             </div>
 
             <h3>Fields</h3>

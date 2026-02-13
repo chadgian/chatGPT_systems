@@ -13,6 +13,8 @@ const selectedTableLabel = document.getElementById('selectedTableLabel');
 const columnNameInput = document.getElementById('columnNameInput');
 const columnTypeInput = document.getElementById('columnTypeInput');
 const addColumnBtn = document.getElementById('addColumnBtn');
+const dropdownOptionsRow = document.getElementById('dropdownOptionsRow');
+const dropdownOptionsInput = document.getElementById('dropdownOptionsInput');
 const columnList = document.getElementById('columnList');
 const rowForm = document.getElementById('rowForm');
 const dataTable = document.getElementById('dataTable');
@@ -61,6 +63,21 @@ async function persist() {
     }, 1200);
 }
 
+function parseDropdownOptions(raw) {
+    return String(raw || '')
+        .split(',')
+        .map(item => item.trim())
+        .filter(Boolean);
+}
+
+function syncDropdownUi() {
+    const isDropdown = columnTypeInput.value === 'dropdown';
+    dropdownOptionsRow.style.display = isDropdown ? 'flex' : 'none';
+    if (!isDropdown) {
+        dropdownOptionsInput.value = '';
+    }
+}
+
 function renderTablesList() {
     if (state.tables.length === 0) {
         tableList.innerHTML = '<li>No data groups yet.</li>';
@@ -93,12 +110,17 @@ function renderColumns() {
     if (!table.columns || table.columns.length === 0) {
         columnList.innerHTML = '<li>No fields yet.</li>';
     } else {
-        columnList.innerHTML = table.columns.map(column => `
-            <li>
-                <span>${escapeHtml(column.name)} <small>(${escapeHtml(column.type)})</small></span>
-                <button class="danger" data-delete-column="${column.id}">Delete</button>
-            </li>
-        `).join('');
+        columnList.innerHTML = table.columns.map(column => {
+            const details = column.type === 'dropdown'
+                ? `${column.type}: ${(column.options || []).join(', ')}`
+                : column.type;
+            return `
+                <li>
+                    <span>${escapeHtml(column.name)} <small>(${escapeHtml(details)})</small></span>
+                    <button class="danger" data-delete-column="${column.id}">Delete</button>
+                </li>
+            `;
+        }).join('');
     }
 
     renderRowForm(table);
@@ -115,6 +137,12 @@ function renderRowForm(table) {
         if (column.type === 'yesno') {
             return `<label>${escapeHtml(column.name)}<select name="${column.id}"><option value="Yes">Yes</option><option value="No">No</option></select></label>`;
         }
+
+        if (column.type === 'dropdown') {
+            const options = (column.options || []).map(opt => `<option value="${escapeHtml(opt)}">${escapeHtml(opt)}</option>`).join('');
+            return `<label>${escapeHtml(column.name)}<select name="${column.id}">${options}</select></label>`;
+        }
+
         const typeMap = { number: 'number', date: 'date', text: 'text' };
         const inputType = typeMap[column.type] || 'text';
         return `<label>${escapeHtml(column.name)}<input type="${inputType}" name="${column.id}" /></label>`;
@@ -246,8 +274,22 @@ addColumnBtn.addEventListener('click', async () => {
     const name = columnNameInput.value.trim();
     if (!table || !name) return;
 
-    table.columns.push({ id: uid('col'), name, type: columnTypeInput.value });
+    const type = columnTypeInput.value;
+    const column = { id: uid('col'), name, type };
+
+    if (type === 'dropdown') {
+        const options = parseDropdownOptions(dropdownOptionsInput.value);
+        if (options.length === 0) {
+            alert('Please add at least one dropdown choice (comma-separated).');
+            return;
+        }
+        column.options = options;
+    }
+
+    table.columns.push(column);
     columnNameInput.value = '';
+    dropdownOptionsInput.value = '';
+    syncDropdownUi();
     renderAll();
     await persist();
 });
@@ -333,4 +375,6 @@ relationList.addEventListener('click', async event => {
     await persist();
 });
 
+columnTypeInput.addEventListener('change', syncDropdownUi);
+syncDropdownUi();
 loadWorkspace();
