@@ -1,104 +1,141 @@
+<?php
+$projectsRoot = __DIR__ . DIRECTORY_SEPARATOR . 'projects';
+$projectItems = [];
+
+if (is_dir($projectsRoot)) {
+    $entries = scandir($projectsRoot) ?: [];
+    foreach ($entries as $entry) {
+        if ($entry === '.' || $entry === '..') {
+            continue;
+        }
+
+        $projectPath = $projectsRoot . DIRECTORY_SEPARATOR . $entry;
+        if (!is_dir($projectPath)) {
+            continue;
+        }
+
+        $indexFile = $projectPath . DIRECTORY_SEPARATOR . 'index.php';
+        $hasEntry = is_file($indexFile);
+
+        $projectItems[] = [
+            'name' => $entry,
+            'path' => $projectPath,
+            'url' => $hasEntry ? 'projects/' . rawurlencode($entry) . '/index.php' : null,
+            'updated' => date('Y-m-d H:i:s', filemtime($projectPath) ?: time()),
+            'has_entry' => $hasEntry,
+        ];
+    }
+}
+
+usort($projectItems, static function (array $a, array $b): int {
+    return strcmp($a['name'], $b['name']);
+});
+
+$totalProjects = count($projectItems);
+$launchableProjects = count(array_filter($projectItems, static fn(array $item): bool => $item['has_entry']));
+?>
 <!doctype html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF Folder Summary Studio</title>
-    <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
+    <title>AI Project Collection</title>
+    <style>
+        :root {
+            font-family: Inter, Arial, sans-serif;
+            color-scheme: light;
+        }
+        body {
+            margin: 0;
+            background: #f4f7ff;
+            color: #1a2340;
+        }
+        .wrap {
+            width: min(980px, 94vw);
+            margin: 2rem auto;
+            display: grid;
+            gap: 1rem;
+        }
+        .panel {
+            background: #fff;
+            border-radius: 14px;
+            border: 1px solid #d9e2f5;
+            box-shadow: 0 10px 24px rgba(31, 53, 104, 0.08);
+            padding: 1rem 1.1rem;
+        }
+        h1 { margin: 0 0 .4rem; }
+        .muted { color: #5f6f94; margin: 0; }
+        .stats { display: flex; gap: 1rem; flex-wrap: wrap; }
+        .chip {
+            background: #edf2ff;
+            color: #2f4ea0;
+            border-radius: 999px;
+            padding: .35rem .7rem;
+            font-weight: 600;
+        }
+        .project-list { list-style: none; padding: 0; margin: 0; display: grid; gap: .65rem; }
+        .project-item {
+            border: 1px solid #e1e8f7;
+            border-radius: 10px;
+            padding: .8rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: .8rem;
+        }
+        .project-name { font-weight: 700; }
+        .project-meta { color: #5f6f94; font-size: .92rem; }
+        a.button {
+            text-decoration: none;
+            background: #3560ff;
+            color: white;
+            padding: .45rem .72rem;
+            border-radius: 8px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .disabled {
+            background: #eef1f9;
+            color: #677498;
+            padding: .45rem .72rem;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+    </style>
 </head>
 <body>
-<main class="app-shell">
-    <header class="hero">
-        <div>
-            <p class="eyebrow">PDF SUMMARY STUDIO</p>
-            <h1>Scan a folder, then optionally add extra PDF files</h1>
-            <p class="subtitle">
-                Choose a local folder from your device, automatically discover all PDFs, and generate folder-wide metrics
-                like total files, total pages, and total size.
-            </p>
-        </div>
-        <div class="hero-badge">No server upload required for scanning</div>
-    </header>
-
-    <section class="panel controls">
-        <h2>1) Choose files</h2>
-        <div class="input-grid">
-            <label class="file-card">
-                <span class="file-card-title">Select a folder</span>
-                <span class="file-card-desc">All PDFs from this folder are included automatically.</span>
-                <input id="folderInput" type="file" webkitdirectory directory multiple>
-            </label>
-
-            <label class="file-card">
-                <span class="file-card-title">Add extra PDFs (optional)</span>
-                <span class="file-card-desc">Each selection appends files; it won’t overwrite your previous extra picks.</span>
-                <input id="extraInput" type="file" accept="application/pdf,.pdf" multiple>
-            </label>
-        </div>
-
-        <div class="selection-preview">
-            <div>
-                <h3>Selected folders</h3>
-                <div id="selectedFolders" class="tag-list"><span class="placeholder">No folder selected.</span></div>
-            </div>
-            <div>
-                <h3>Selected files</h3>
-                <ul id="selectedFilesList" class="selected-list"><li class="placeholder">No files selected yet.</li></ul>
-            </div>
-        </div>
-
-        <div class="toolbar">
-            <button type="button" id="scanBtn" class="primary">Scan & Build Summary</button>
-            <button type="button" id="selectAllBtn">Select all</button>
-            <button type="button" id="selectNoneBtn">Clear all</button>
-            <button type="button" id="resetBtn" class="danger">Reset selection</button>
-            <input id="searchInput" type="search" placeholder="Quick filter table rows...">
-        </div>
-        <p id="statusText" class="status-text">No folder selected yet.</p>
-    </section>
-
-    <section class="panel metrics" aria-live="polite">
-        <h2>2) Summary</h2>
-        <div class="metric-grid">
-            <article class="metric"><p>All discovered PDFs</p><strong id="totalFiles">0</strong></article>
-            <article class="metric"><p>Total pages (all)</p><strong id="totalPages">0</strong></article>
-            <article class="metric"><p>Total size (all)</p><strong id="totalSize">0 KB</strong></article>
-            <article class="metric"><p>Selected PDFs</p><strong id="selectedFiles">0</strong></article>
-            <article class="metric"><p>Selected pages</p><strong id="selectedPages">0</strong></article>
-            <article class="metric"><p>Selected size</p><strong id="selectedSize">0 KB</strong></article>
+<main class="wrap">
+    <section class="panel">
+        <h1>AI Project Collection</h1>
+        <p class="muted">This homepage tracks AI-generated projects in this repository.</p>
+        <div class="stats">
+            <span class="chip">Total projects: <?= $totalProjects ?></span>
+            <span class="chip">Launchable projects: <?= $launchableProjects ?></span>
         </div>
     </section>
 
-    <section class="panel table-panel">
-        <div class="table-head">
-            <h2>3) File details</h2>
-            <span id="selectedCountLabel">0 of 0 selected</span>
-        </div>
-
-        <div class="table-wrap">
-            <table id="fileTable">
-                <thead>
-                <tr>
-                    <th>Include</th>
-                    <th>File</th>
-                    <th>Source</th>
-                    <th>Pages</th>
-                    <th>Size</th>
-                    <th>Date</th>
-                    <th>Path</th>
-                </tr>
-                </thead>
-                <tbody id="fileTableBody">
-                <tr><td colspan="7" class="empty">Choose files and click “Scan & Build Summary”.</td></tr>
-                </tbody>
-            </table>
-        </div>
+    <section class="panel">
+        <h2>Projects</h2>
+        <?php if (empty($projectItems)): ?>
+            <p class="muted">No project directories found in <code>projects/</code> yet.</p>
+        <?php else: ?>
+            <ul class="project-list">
+                <?php foreach ($projectItems as $project): ?>
+                    <li class="project-item">
+                        <div>
+                            <div class="project-name"><?= htmlspecialchars($project['name'], ENT_QUOTES, 'UTF-8') ?></div>
+                            <div class="project-meta">Updated: <?= htmlspecialchars($project['updated'], ENT_QUOTES, 'UTF-8') ?></div>
+                        </div>
+                        <?php if ($project['url'] !== null): ?>
+                            <a class="button" href="<?= htmlspecialchars($project['url'], ENT_QUOTES, 'UTF-8') ?>">Open Project</a>
+                        <?php else: ?>
+                            <span class="disabled">No index.php</span>
+                        <?php endif; ?>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        <?php endif; ?>
     </section>
 </main>
-
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
-<script type="module" src="script.js"></script>
 </body>
 </html>
