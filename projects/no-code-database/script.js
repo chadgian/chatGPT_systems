@@ -1,4 +1,4 @@
-const state = { tables: [], relations: [], selectedTableId: null, editingRowId: null };
+const state = { tables: [], relations: [], selectedTableId: null, editingRowId: null, mergeOptionMap: new Map() };
 
 const saveStateBadge = document.getElementById('saveState');
 const tableNameInput = document.getElementById('tableNameInput');
@@ -58,12 +58,11 @@ function parseDropdownOptions(raw) {
 }
 
 function displayValue(column, value) {
-    if (column.type !== 'relation') return String(value ?? '');
+    if (column?.type !== 'relation') return String(value ?? '');
 
-    const relation = column.relation || {};
-    const targetTable = getTableById(relation.tableId);
+    const targetTable = getTableById(column.relation?.tableId);
     const targetRow = (targetTable?.rows || []).find(r => r.id === value);
-    const targetCol = getColumnById(targetTable, relation.columnId);
+    const targetCol = getColumnById(targetTable, column.relation?.columnId);
     return String(targetRow?.values?.[targetCol?.id] ?? '');
 }
 
@@ -227,35 +226,90 @@ function renderDataTable(table) {
     dataTable.innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
 }
 
+function buildMergeOptions(baseTable, maxDepth = 3) {
+    const options = [];
+
+    function walk(currentTable, relationChain, labelChain, depth) {
+        for (const col of currentTable.columns || []) {
+            if (relationChain.length === 0) {
+                const key = `base:${col.id}`;
+                const descriptor = { key, type: 'base', baseColumnId: col.id, relationChain: [], leafColumnId: col.id, label: col.name };
+                options.push(descriptor);
+                state.mergeOptionMap.set(key, descriptor);
+            } else {
+                const key = `path:${relationChain.join('>')}::${col.id}`;
+                const descriptor = {
+                    key,
+                    type: 'path',
+                    baseColumnId: relationChain[0],
+                    relationChain: [...relationChain],
+                    leafColumnId: col.id,
+                    label: `${labelChain.join(' → ')} → ${col.name}`,
+                };
+                options.push(descriptor);
+                state.mergeOptionMap.set(key, descriptor);
+            }
+
+            if (col.type === 'relation' && depth < maxDepth) {
+                const nextTable = getTableById(col.relation?.tableId);
+                if (nextTable) {
+                    const nextRelationChain = [...relationChain, col.id];
+                    const nextLabelChain = relationChain.length === 0 ? [col.name] : [...labelChain, col.name];
+                    walk(nextTable, nextRelationChain, nextLabelChain, depth + 1);
+                }
+            }
+        }
+    }
+
+    walk(baseTable, [], [], 1);
+    return options;
+}
+
 function renderMergeControls() {
     mergeBaseTable.innerHTML = `<option value="">Select main group</option>${tableOptions(mergeBaseTable.value)}`;
     renderMergeColumns();
 }
 
 function renderMergeColumns() {
+    state.mergeOptionMap = new Map();
     const base = getTableById(mergeBaseTable.value);
     if (!base) {
         mergeColumns.innerHTML = '<p class="muted">Select a main group first.</p>';
         return;
     }
 
-    const options = [];
-    for (const col of base.columns || []) {
-        options.push({ id: `base:${col.id}`, label: `${col.name}` });
+    const options = buildMergeOptions(base, 3);
+    mergeColumns.innerHTML = options.length
+        ? options.map((opt, idx) => `<label class="chip-option"><input type="checkbox" value="${opt.key}" ${idx < 6 ? 'checked' : ''}>${escapeHtml(opt.label)}</label>`).join('')
+        : '<p class="muted">No columns available.</p>';
+}
 
-        if (col.type === 'relation') {
-            const targetTable = getTableById(col.relation?.tableId);
-            if (targetTable) {
-                for (const targetCol of targetTable.columns || []) {
-                    options.push({ id: `rel:${col.id}:${targetCol.id}`, label: `${col.name} → ${targetCol.name}` });
-                }
-            }
-        }
+function resolveMergedValue(baseTable, baseRow, descriptor) {
+    if (descriptor.type === 'base') {
+        const col = getColumnById(baseTable, descriptor.baseColumnId);
+        return displayValue(col, baseRow.values?.[descriptor.baseColumnId] ?? '');
     }
 
-    mergeColumns.innerHTML = options.length
-        ? options.map((opt, idx) => `<label class="chip-option"><input type="checkbox" value="${opt.id}" ${idx < 4 ? 'checked' : ''}>${escapeHtml(opt.label)}</label>`).join('')
-        : '<p class="muted">No columns available.</p>';
+    let currentTable = baseTable;
+    let currentRow = baseRow;
+
+    for (const relColId of descriptor.relationChain) {
+        const relCol = getColumnById(currentTable, relColId);
+        if (!relCol || relCol.type !== 'relation') return '';
+
+        const nextTable = getTableById(relCol.relation?.tableId);
+        if (!nextTable) return '';
+
+        const linkedRowId = currentRow?.values?.[relColId] ?? '';
+        const linkedRow = (nextTable.rows || []).find(r => r.id === linkedRowId);
+        if (!linkedRow) return '';
+
+        currentTable = nextTable;
+        currentRow = linkedRow;
+    }
+
+    const leafCol = getColumnById(currentTable, descriptor.leafColumnId);
+    return displayValue(leafCol, currentRow?.values?.[descriptor.leafColumnId] ?? '');
 }
 
 function renderMergedTable() {
@@ -265,41 +319,22 @@ function renderMergedTable() {
         return;
     }
 
-    const selected = Array.from(mergeColumns.querySelectorAll('input[type="checkbox"]:checked')).map(el => el.value);
-    if (!selected.length) {
+    const selectedKeys = Array.from(mergeColumns.querySelectorAll('input[type="checkbox"]:checked')).map(el => el.value);
+    if (!selectedKeys.length) {
         mergeTable.innerHTML = '<tr><td>Please select at least one column to show.</td></tr>';
         return;
     }
 
-    const headers = selected.map(key => {
-        if (key.startsWith('base:')) {
-            const col = getColumnById(base, key.split(':')[1]);
-            return `${col?.name || '?'}`;
-        }
-        const [, relColId, targetColId] = key.split(':');
-        const relCol = getColumnById(base, relColId);
-        const tTable = getTableById(relCol?.relation?.tableId);
-        const tCol = getColumnById(tTable, targetColId);
-        return `${relCol?.name || '?'} → ${tCol?.name || '?'}`;
-    });
+    const descriptors = selectedKeys.map(key => state.mergeOptionMap.get(key)).filter(Boolean);
+    const headers = descriptors.map(descriptor => descriptor.label);
 
     const head = `<tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`;
-    const rows = (base.rows || []).map(row => {
-        const cells = selected.map(key => {
-            if (key.startsWith('base:')) {
-                const col = getColumnById(base, key.split(':')[1]);
-                return `<td>${escapeHtml(displayValue(col, row.values?.[col?.id] ?? ''))}</td>`;
-            }
-            const [, relColId, targetColId] = key.split(':');
-            const relCol = getColumnById(base, relColId);
-            const tTable = getTableById(relCol?.relation?.tableId);
-            const linkedRow = (tTable?.rows || []).find(r => r.id === (row.values?.[relColId] ?? ''));
-            return `<td>${escapeHtml(String(linkedRow?.values?.[targetColId] ?? ''))}</td>`;
-        }).join('');
+    const rows = (base.rows || []).map(baseRow => {
+        const cells = descriptors.map(descriptor => `<td>${escapeHtml(String(resolveMergedValue(base, baseRow, descriptor) ?? ''))}</td>`).join('');
         return `<tr>${cells}</tr>`;
     }).join('');
 
-    mergeTable.innerHTML = `<thead>${head}</thead><tbody>${rows || `<tr><td colspan="${selected.length}">No records yet.</td></tr>`}</tbody>`;
+    mergeTable.innerHTML = `<thead>${head}</thead><tbody>${rows || `<tr><td colspan="${descriptors.length}">No records yet.</td></tr>`}</tbody>`;
 }
 
 function renderAll() {
