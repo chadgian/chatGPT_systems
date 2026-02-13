@@ -1,4 +1,5 @@
 import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.min.mjs';
+import { createWorker } from 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.esm.min.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.worker.min.mjs';
 
@@ -30,6 +31,7 @@ let folderFiles = [];
 let extraFiles = [];
 let scannedRows = [];
 let scannedMap = new Map();
+let ocrWorker = null;
 
 function fileKey(file) {
     return `${file.name}|${file.size}|${file.lastModified}`;
@@ -37,6 +39,10 @@ function fileKey(file) {
 
 function formatKB(bytes) {
     return `${(bytes / 1024).toFixed(2)} KB`;
+}
+
+function formatDate(timestamp) {
+    return new Date(timestamp).toLocaleString();
 }
 
 function getTopFolder(file) {
@@ -51,12 +57,10 @@ function toPdfFiles(list) {
 function invalidateScan(message) {
     scannedRows = [];
     scannedMap = new Map();
-    tableBody.innerHTML = '<tr><td colspan="6" class="empty">Choose files and click “Scan & Build Summary”.</td></tr>';
+    tableBody.innerHTML = '<tr><td colspan="7" class="empty">Choose files and click “Scan & Build Summary”.</td></tr>';
     updateMetrics();
     aiOutput.textContent = 'Run a scan first, then click “Generate AI summary”.';
-    if (message) {
-        statusText.textContent = message;
-    }
+    if (message) statusText.textContent = message;
 }
 
 function renderSelectedFolders() {
@@ -102,24 +106,48 @@ function refreshSelectionPreview() {
     renderSelectedFiles();
 }
 
+async function getOcrWorker() {
+    if (ocrWorker) return ocrWorker;
+    ocrWorker = await createWorker('eng');
+    return ocrWorker;
+}
+
+async function extractTextFromPage(page) {
+    const textContent = await page.getTextContent();
+    const text = textContent.items.map(item => item.str).join(' ').trim();
+    if (text.length > 40) return { text, method: 'text' };
+
+    const viewport = page.getViewport({ scale: 1.5 });
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: context, viewport }).promise;
+
+    const worker = await getOcrWorker();
+    const {
+        data: { text: ocrText },
+    } = await worker.recognize(canvas);
+    return { text: (ocrText || '').trim(), method: 'ocr' };
+}
+
 async function extractTextSample(pdf, maxPages = 2) {
     const pages = Math.min(maxPages, pdf.numPages || 0);
     let text = '';
+    let usedOcr = false;
 
     for (let i = 1; i <= pages; i += 1) {
         const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const pageText = content.items.map(item => item.str).join(' ');
-        text += ` ${pageText}`;
+        const result = await extractTextFromPage(page);
+        if (result.method === 'ocr') usedOcr = true;
+        text += ` ${result.text}`;
     }
 
-    return text.trim();
+    return { text: text.trim(), usedOcr };
 }
 
 function localHeuristicSummary(scannedEntries) {
-    if (scannedEntries.length === 0) {
-        return 'No scanned files available for summary.';
-    }
+    if (scannedEntries.length === 0) return 'No scanned files available for summary.';
 
     const allText = scannedEntries.map(entry => entry.textSample).join(' ').toLowerCase();
     const tokens = allText
@@ -128,25 +156,23 @@ function localHeuristicSummary(scannedEntries) {
         .filter(word => word.length > 4 && !['about', 'there', 'their', 'which', 'these', 'those', 'would', 'could', 'should', 'where', 'pages', 'document'].includes(word));
 
     const freq = new Map();
-    for (const token of tokens) {
-        freq.set(token, (freq.get(token) || 0) + 1);
-    }
+    for (const token of tokens) freq.set(token, (freq.get(token) || 0) + 1);
 
     const topKeywords = Array.from(freq.entries())
         .sort((a, b) => b[1] - a[1])
         .slice(0, 8)
         .map(([word]) => word);
 
-    const previewLines = scannedEntries.slice(0, 5).map(entry => `- ${entry.name}: ${entry.textSample.slice(0, 140) || 'No readable text sample.'}`);
+    const previewLines = scannedEntries.slice(0, 8).map(entry =>
+        `- ${entry.name} (${entry.dateLabel}${entry.usedOcr ? ', OCR used' : ''}): ${entry.textSample.slice(0, 140) || 'No readable text sample.'}`
+    );
 
     return [
-        `Local AI-style summary (heuristic):`,
-        `The selected PDF collection appears to focus on: ${topKeywords.join(', ') || 'mixed topics'}.
-`,
-        `Top file previews:`,
-        ...previewLines,
+        'Local AI-style summary (heuristic + OCR fallback):',
+        `The selected PDF collection appears to focus on: ${topKeywords.join(', ') || 'mixed topics'}.`,
         '',
-        'Tip: For a stronger summary, connect this page to a remote LLM endpoint and send extracted text samples.',
+        'File highlights:',
+        ...previewLines,
     ].join('\n');
 }
 
@@ -154,9 +180,9 @@ async function getPageCountAndText(file) {
     const buffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
     const pages = pdf.numPages || 0;
-    const textSample = await extractTextSample(pdf, 2);
+    const sample = await extractTextSample(pdf, 2);
     pdf.destroy();
-    return { pages, textSample };
+    return { pages, textSample: sample.text, usedOcr: sample.usedOcr };
 }
 
 async function scanFiles() {
@@ -165,20 +191,14 @@ async function scanFiles() {
         return;
     }
 
-    statusText.textContent = 'Scanning PDFs and counting pages...';
+    statusText.textContent = 'Scanning PDFs, extracting text, and running OCR when needed...';
     scanBtn.disabled = true;
 
     const merged = new Map();
-    for (const file of folderFiles) {
-        merged.set(fileKey(file), { file, source: 'Folder' });
-    }
+    for (const file of folderFiles) merged.set(fileKey(file), { file, source: 'Folder' });
     for (const file of extraFiles) {
         const key = fileKey(file);
-        if (merged.has(key)) {
-            merged.set(key, { file, source: 'Folder + Extra' });
-        } else {
-            merged.set(key, { file, source: 'Extra' });
-        }
+        merged.set(key, { file, source: merged.has(key) ? 'Folder + Extra' : 'Extra' });
     }
 
     const all = Array.from(merged.values());
@@ -189,18 +209,20 @@ async function scanFiles() {
         const { file, source } = all[i];
         let pages = 0;
         let textSample = '';
+        let usedOcr = false;
 
         try {
             const result = await getPageCountAndText(file);
             pages = result.pages;
             textSample = result.textSample;
+            usedOcr = result.usedOcr;
         } catch {
             pages = 0;
-            textSample = '';
         }
 
         const key = fileKey(file);
-        localMap.set(key, { name: file.name, source, pages, textSample, size: file.size });
+        const dateLabel = formatDate(file.lastModified);
+        localMap.set(key, { name: file.name, source, pages, textSample, size: file.size, dateLabel, usedOcr });
 
         rows.push({
             id: `row-${i}`,
@@ -210,6 +232,7 @@ async function scanFiles() {
             source,
             size: file.size,
             pages,
+            dateLabel,
             path: file.webkitRelativePath || '(extra file)',
         });
 
@@ -227,10 +250,10 @@ async function scanFiles() {
 
 function renderTable() {
     const term = searchInput.value.toLowerCase().trim();
-    const visible = scannedRows.filter(row => !term || [row.name, row.path, row.source].join(' ').toLowerCase().includes(term));
+    const visible = scannedRows.filter(row => !term || [row.name, row.path, row.source, row.dateLabel].join(' ').toLowerCase().includes(term));
 
     if (visible.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="6" class="empty">No files match your search.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="7" class="empty">No files match your search.</td></tr>';
         return;
     }
 
@@ -241,6 +264,7 @@ function renderTable() {
             <td>${escapeHtml(row.source)}</td>
             <td>${row.pages}</td>
             <td>${formatKB(row.size)}</td>
+            <td>${escapeHtml(row.dateLabel)}</td>
             <td>${escapeHtml(row.path)}</td>
         </tr>
     `).join('');
@@ -265,11 +289,7 @@ function updateMetrics() {
 }
 
 async function generateAiSummary() {
-    const selectedEntries = scannedRows
-        .filter(row => row.include)
-        .map(row => scannedMap.get(row.key))
-        .filter(Boolean);
-
+    const selectedEntries = scannedRows.filter(row => row.include).map(row => scannedMap.get(row.key)).filter(Boolean);
     if (selectedEntries.length === 0) {
         aiStatus.textContent = 'Select at least one scanned PDF to summarize.';
         aiOutput.textContent = 'No selected files available for summary.';
@@ -278,10 +298,8 @@ async function generateAiSummary() {
 
     aiStatus.textContent = 'Generating summary...';
     aiSummaryBtn.disabled = true;
-
     try {
-        const summary = localHeuristicSummary(selectedEntries);
-        aiOutput.textContent = summary;
+        aiOutput.textContent = localHeuristicSummary(selectedEntries);
         aiStatus.textContent = `Summary generated for ${selectedEntries.length} selected PDF(s).`;
     } finally {
         aiSummaryBtn.disabled = false;
@@ -300,15 +318,12 @@ function escapeHtml(value) {
 folderInput.addEventListener('change', () => {
     folderFiles = toPdfFiles(folderInput.files);
     refreshSelectionPreview();
-    invalidateScan(folderFiles.length > 0
-        ? `Folder selected with ${folderFiles.length} PDF file(s). Click “Scan & Build Summary”.`
-        : 'No folder selected yet.');
+    invalidateScan(folderFiles.length > 0 ? `Folder selected with ${folderFiles.length} PDF file(s). Click “Scan & Build Summary”.` : 'No folder selected yet.');
 });
 
 extraInput.addEventListener('change', () => {
     const newlySelected = toPdfFiles(extraInput.files);
     if (newlySelected.length === 0) return;
-
     const seen = new Set(extraFiles.map(fileKey));
     for (const file of newlySelected) {
         const key = fileKey(file);
@@ -317,7 +332,6 @@ extraInput.addEventListener('change', () => {
             seen.add(key);
         }
     }
-
     extraInput.value = '';
     refreshSelectionPreview();
     invalidateScan(`${extraFiles.length} extra PDF file(s) currently selected (appended). Click “Scan & Build Summary”.`);
@@ -335,16 +349,10 @@ selectedFolders.addEventListener('click', (event) => {
 selectedFilesList.addEventListener('click', (event) => {
     const button = event.target.closest('[data-remove-file]');
     if (!button) return;
-
     const key = button.dataset.removeFile;
     const source = button.dataset.source;
-
-    if (source === 'Folder') {
-        folderFiles = folderFiles.filter(file => fileKey(file) !== key);
-    } else {
-        extraFiles = extraFiles.filter(file => fileKey(file) !== key);
-    }
-
+    if (source === 'Folder') folderFiles = folderFiles.filter(file => fileKey(file) !== key);
+    else extraFiles = extraFiles.filter(file => fileKey(file) !== key);
     refreshSelectionPreview();
     invalidateScan('Selection updated. Re-scan to refresh summary.');
 });
@@ -374,7 +382,7 @@ tableBody.addEventListener('change', (event) => {
     updateMetrics();
 });
 
-resetBtn.addEventListener('click', () => {
+resetBtn.addEventListener('click', async () => {
     folderInput.value = '';
     extraInput.value = '';
     searchInput.value = '';
@@ -382,6 +390,10 @@ resetBtn.addEventListener('click', () => {
     extraFiles = [];
     refreshSelectionPreview();
     invalidateScan('Selections reset. Choose a new folder and/or extra files.');
+    if (ocrWorker) {
+        await ocrWorker.terminate();
+        ocrWorker = null;
+    }
 });
 
 refreshSelectionPreview();

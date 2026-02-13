@@ -88,11 +88,12 @@
                     <th>Source</th>
                     <th>Pages</th>
                     <th>Size</th>
+                    <th>Date</th>
                     <th>Path</th>
                 </tr>
                 </thead>
                 <tbody id="fileTableBody">
-                <tr><td colspan="6" class="empty">Choose files and click “Scan & Build Summary”.</td></tr>
+                <tr><td colspan="7" class="empty">Choose files and click “Scan & Build Summary”.</td></tr>
                 </tbody>
             </table>
         </div>
