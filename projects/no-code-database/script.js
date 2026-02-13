@@ -1,8 +1,4 @@
-const state = {
-    tables: [],
-    relations: [],
-    selectedTableId: null,
-};
+const state = { tables: [], relations: [], selectedTableId: null };
 
 const saveStateBadge = document.getElementById('saveState');
 const tableNameInput = document.getElementById('tableNameInput');
@@ -15,34 +11,30 @@ const columnTypeInput = document.getElementById('columnTypeInput');
 const addColumnBtn = document.getElementById('addColumnBtn');
 const dropdownOptionsRow = document.getElementById('dropdownOptionsRow');
 const dropdownOptionsInput = document.getElementById('dropdownOptionsInput');
+const relationOptionsRow = document.getElementById('relationOptionsRow');
+const relationTableInput = document.getElementById('relationTableInput');
+const relationColumnInput = document.getElementById('relationColumnInput');
 const columnList = document.getElementById('columnList');
 const rowForm = document.getElementById('rowForm');
 const dataTable = document.getElementById('dataTable');
 
-const fromTable = document.getElementById('fromTable');
-const fromColumn = document.getElementById('fromColumn');
-const toTable = document.getElementById('toTable');
-const toColumn = document.getElementById('toColumn');
-const relationLabel = document.getElementById('relationLabel');
-const addRelationBtn = document.getElementById('addRelationBtn');
-const relationList = document.getElementById('relationList');
+const mergeBaseTable = document.getElementById('mergeBaseTable');
+const refreshMergeColumnsBtn = document.getElementById('refreshMergeColumnsBtn');
+const renderMergeBtn = document.getElementById('renderMergeBtn');
+const mergeColumns = document.getElementById('mergeColumns');
+const mergeTable = document.getElementById('mergeTable');
 
-function uid(prefix) {
-    return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function selectedTable() {
-    return state.tables.find(t => t.id === state.selectedTableId) || null;
-}
+function uid(prefix) { return `${prefix}_${Math.random().toString(36).slice(2, 9)}`; }
+function selectedTable() { return state.tables.find(t => t.id === state.selectedTableId) || null; }
+function getTableById(id) { return state.tables.find(t => t.id === id) || null; }
+function getColumnById(table, columnId) { return table?.columns?.find(c => c.id === columnId) || null; }
 
 async function loadWorkspace() {
     const response = await fetch('index.php?api=1');
     const data = await response.json();
     state.tables = Array.isArray(data.tables) ? data.tables : [];
     state.relations = Array.isArray(data.relations) ? data.relations : [];
-    if (state.tables.length > 0) {
-        state.selectedTableId = state.tables[0].id;
-    }
+    state.selectedTableId = state.tables[0]?.id || null;
     renderAll();
 }
 
@@ -53,32 +45,60 @@ async function persist() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tables: state.tables, relations: state.relations }),
     });
-    if (!response.ok) {
-        saveStateBadge.textContent = 'Save failed';
-        return;
+
+    saveStateBadge.textContent = response.ok ? 'Saved' : 'Save failed';
+    if (response.ok) {
+        setTimeout(() => { saveStateBadge.textContent = 'Ready'; }, 1000);
     }
-    saveStateBadge.textContent = 'Saved';
-    setTimeout(() => {
-        saveStateBadge.textContent = 'Ready';
-    }, 1200);
 }
 
 function parseDropdownOptions(raw) {
-    return String(raw || '')
-        .split(',')
-        .map(item => item.trim())
-        .filter(Boolean);
+    return String(raw || '').split(',').map(item => item.trim()).filter(Boolean);
 }
 
-function syncDropdownUi() {
-    const isDropdown = columnTypeInput.value === 'dropdown';
+function displayValue(column, value) {
+    if (column.type !== 'relation') {
+        return String(value ?? '');
+    }
+
+    const relation = column.relation || {};
+    const targetTable = getTableById(relation.tableId);
+    if (!targetTable) return '';
+    const targetRow = (targetTable.rows || []).find(r => r.id === value);
+    if (!targetRow) return '';
+    const targetCol = getColumnById(targetTable, relation.columnId);
+    if (!targetCol) return '';
+    return String(targetRow.values?.[targetCol.id] ?? '');
+}
+
+function tableOptions(selectedId = '', includePrompt = false) {
+    const opts = state.tables.map(table => `<option value="${table.id}" ${table.id === selectedId ? 'selected' : ''}>${escapeHtml(table.name)}</option>`).join('');
+    return includePrompt ? `<option value="">Select group</option>${opts}` : opts;
+}
+
+function relationColumnOptions(tableId, selectedId = '') {
+    const table = getTableById(tableId);
+    if (!table) return '<option value="">Select field</option>';
+    const opts = (table.columns || []).map(col => `<option value="${col.id}" ${col.id === selectedId ? 'selected' : ''}>${escapeHtml(col.name)}</option>`).join('');
+    return `<option value="">Select field</option>${opts}`;
+}
+
+function syncTypeUi() {
+    const type = columnTypeInput.value;
+    const isDropdown = type === 'dropdown';
+    const isRelation = type === 'relation';
+
     dropdownOptionsRow.style.display = isDropdown ? 'flex' : 'none';
-    if (!isDropdown) {
-        dropdownOptionsInput.value = '';
+    relationOptionsRow.style.display = isRelation ? 'flex' : 'none';
+
+    if (!isDropdown) dropdownOptionsInput.value = '';
+    if (!isRelation) {
+        relationTableInput.value = '';
+        relationColumnInput.innerHTML = '<option value="">Select field</option>';
     }
 }
 
-function renderTablesList() {
+function renderTableList() {
     if (state.tables.length === 0) {
         tableList.innerHTML = '<li>No data groups yet.</li>';
         return;
@@ -95,8 +115,15 @@ function renderTablesList() {
     `).join('');
 }
 
-function renderColumns() {
+function renderRelationSelectors() {
+    relationTableInput.innerHTML = tableOptions(relationTableInput.value, true);
+    relationColumnInput.innerHTML = relationColumnOptions(relationTableInput.value, relationColumnInput.value);
+}
+
+function renderFieldsAndRecords() {
     const table = selectedTable();
+    renderRelationSelectors();
+
     if (!table) {
         selectedTableLabel.textContent = 'Pick a data group to start.';
         columnList.innerHTML = '<li>No fields yet.</li>';
@@ -107,19 +134,21 @@ function renderColumns() {
 
     selectedTableLabel.textContent = `You are editing: ${table.name}`;
 
-    if (!table.columns || table.columns.length === 0) {
+    if (!table.columns?.length) {
         columnList.innerHTML = '<li>No fields yet.</li>';
     } else {
         columnList.innerHTML = table.columns.map(column => {
-            const details = column.type === 'dropdown'
-                ? `${column.type}: ${(column.options || []).join(', ')}`
-                : column.type;
-            return `
-                <li>
-                    <span>${escapeHtml(column.name)} <small>(${escapeHtml(details)})</small></span>
-                    <button class="danger" data-delete-column="${column.id}">Delete</button>
-                </li>
-            `;
+            let details = column.type;
+            if (column.type === 'dropdown') details = `${details}: ${(column.options || []).join(', ')}`;
+            if (column.type === 'relation') {
+                const targetTable = getTableById(column.relation?.tableId);
+                const targetCol = getColumnById(targetTable, column.relation?.columnId);
+                details = `relation: ${targetTable?.name || '?'} → ${targetCol?.name || '?'}`;
+            }
+            return `<li>
+                <span>${escapeHtml(column.name)} <small>(${escapeHtml(details)})</small></span>
+                <button class="danger" data-delete-column="${column.id}">Delete</button>
+            </li>`;
         }).join('');
     }
 
@@ -128,12 +157,12 @@ function renderColumns() {
 }
 
 function renderRowForm(table) {
-    if (!table.columns || table.columns.length === 0) {
+    if (!table.columns?.length) {
         rowForm.innerHTML = '<p class="muted">Add fields first before adding records.</p>';
         return;
     }
 
-    const fieldsHtml = table.columns.map(column => {
+    const fields = table.columns.map(column => {
         if (column.type === 'yesno') {
             return `<label>${escapeHtml(column.name)}<select name="${column.id}"><option value="Yes">Yes</option><option value="No">No</option></select></label>`;
         }
@@ -143,77 +172,132 @@ function renderRowForm(table) {
             return `<label>${escapeHtml(column.name)}<select name="${column.id}">${options}</select></label>`;
         }
 
+        if (column.type === 'relation') {
+            const targetTable = getTableById(column.relation?.tableId);
+            const targetCol = getColumnById(targetTable, column.relation?.columnId);
+            const options = (targetTable?.rows || []).map(row => {
+                const label = targetCol ? row.values?.[targetCol.id] : row.id;
+                return `<option value="${row.id}">${escapeHtml(String(label ?? '(empty)'))}</option>`;
+            }).join('');
+            return `<label>${escapeHtml(column.name)}<select name="${column.id}"><option value="">Select linked record</option>${options}</select></label>`;
+        }
+
         const typeMap = { number: 'number', date: 'date', text: 'text' };
-        const inputType = typeMap[column.type] || 'text';
-        return `<label>${escapeHtml(column.name)}<input type="${inputType}" name="${column.id}" /></label>`;
+        return `<label>${escapeHtml(column.name)}<input type="${typeMap[column.type] || 'text'}" name="${column.id}" /></label>`;
     }).join('');
 
-    rowForm.innerHTML = `${fieldsHtml}<button type="submit">Add record</button>`;
+    rowForm.innerHTML = `${fields}<button type="submit">Add record</button>`;
 }
 
 function renderDataTable(table) {
     const columns = table.columns || [];
     const rows = table.rows || [];
-
-    if (columns.length === 0) {
+    if (!columns.length) {
         dataTable.innerHTML = '';
         return;
     }
 
-    const head = `<tr>${columns.map(column => `<th>${escapeHtml(column.name)}</th>`).join('')}<th>Actions</th></tr>`;
+    const head = `<tr>${columns.map(c => `<th>${escapeHtml(c.name)}</th>`).join('')}<th>Actions</th></tr>`;
     const body = rows.length === 0
         ? `<tr><td colspan="${columns.length + 1}">No records yet.</td></tr>`
         : rows.map(row => {
-            const cells = columns.map(column => `<td>${escapeHtml(row.values?.[column.id] ?? '')}</td>`).join('');
+            const cells = columns.map(col => `<td>${escapeHtml(displayValue(col, row.values?.[col.id] ?? ''))}</td>`).join('');
             return `<tr>${cells}<td><button class="danger" data-delete-row="${row.id}">Delete</button></td></tr>`;
         }).join('');
 
     dataTable.innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
 }
 
-function tableOptionsHtml(selectedId = '') {
-    return state.tables.map(table => `<option value="${table.id}" ${table.id === selectedId ? 'selected' : ''}>${escapeHtml(table.name)}</option>`).join('');
+function renderMergeControls() {
+    mergeBaseTable.innerHTML = `<option value="">Select main group</option>${tableOptions(mergeBaseTable.value)}`;
+    renderMergeColumns();
 }
 
-function columnOptionsHtml(tableId, selectedColId = '') {
-    const table = state.tables.find(t => t.id === tableId);
-    if (!table || !Array.isArray(table.columns)) {
-        return '';
-    }
-    return table.columns.map(col => `<option value="${col.id}" ${col.id === selectedColId ? 'selected' : ''}>${escapeHtml(col.name)}</option>`).join('');
-}
-
-function renderRelations() {
-    const firstTableId = state.tables[0]?.id || '';
-    const secondTableId = state.tables[1]?.id || firstTableId;
-
-    fromTable.innerHTML = `<option value="">From group</option>${tableOptionsHtml(fromTable.value || firstTableId)}`;
-    toTable.innerHTML = `<option value="">To group</option>${tableOptionsHtml(toTable.value || secondTableId)}`;
-
-    fromColumn.innerHTML = `<option value="">From field</option>${columnOptionsHtml(fromTable.value)}`;
-    toColumn.innerHTML = `<option value="">To field</option>${columnOptionsHtml(toTable.value)}`;
-
-    if (state.relations.length === 0) {
-        relationList.innerHTML = '<li>No connections yet.</li>';
+function renderMergeColumns() {
+    const base = getTableById(mergeBaseTable.value);
+    if (!base) {
+        mergeColumns.innerHTML = '<p class="muted">Select a main group first.</p>';
         return;
     }
 
-    relationList.innerHTML = state.relations.map(rel => {
-        const aTable = state.tables.find(t => t.id === rel.fromTableId);
-        const bTable = state.tables.find(t => t.id === rel.toTableId);
-        const aCol = aTable?.columns?.find(c => c.id === rel.fromColumnId);
-        const bCol = bTable?.columns?.find(c => c.id === rel.toColumnId);
-        return `<li>
-            <span>${escapeHtml(rel.label || 'Connection')}: ${escapeHtml(aTable?.name || '?')} / ${escapeHtml(aCol?.name || '?')} → ${escapeHtml(bTable?.name || '?')} / ${escapeHtml(bCol?.name || '?')}</span>
-            <button class="danger" data-delete-relation="${rel.id}">Delete</button>
-        </li>`;
+    const options = [];
+    for (const col of base.columns || []) {
+        options.push({ id: `base:${col.id}`, label: `${base.name} / ${col.name}` });
+
+        if (col.type === 'relation') {
+            const targetTable = getTableById(col.relation?.tableId);
+            if (targetTable) {
+                for (const targetCol of targetTable.columns || []) {
+                    options.push({ id: `rel:${col.id}:${targetCol.id}`, label: `${base.name} / ${col.name} → ${targetTable.name} / ${targetCol.name}` });
+                }
+            }
+        }
+    }
+
+    if (!options.length) {
+        mergeColumns.innerHTML = '<p class="muted">No columns available.</p>';
+        return;
+    }
+
+    mergeColumns.innerHTML = options.map((opt, idx) => `
+        <label class="chip-option">
+            <input type="checkbox" value="${opt.id}" ${idx < 4 ? 'checked' : ''}>
+            ${escapeHtml(opt.label)}
+        </label>
+    `).join('');
+}
+
+function renderMergedTable() {
+    const base = getTableById(mergeBaseTable.value);
+    if (!base) {
+        mergeTable.innerHTML = '';
+        return;
+    }
+
+    const selected = Array.from(mergeColumns.querySelectorAll('input[type="checkbox"]:checked')).map(el => el.value);
+    if (!selected.length) {
+        mergeTable.innerHTML = '<tr><td>Please select at least one column to show.</td></tr>';
+        return;
+    }
+
+    const headers = selected.map(key => {
+        if (key.startsWith('base:')) {
+            const col = getColumnById(base, key.split(':')[1]);
+            return `${base.name} / ${col?.name || '?'}`;
+        }
+        const [, relColId, targetColId] = key.split(':');
+        const relCol = getColumnById(base, relColId);
+        const tTable = getTableById(relCol?.relation?.tableId);
+        const tCol = getColumnById(tTable, targetColId);
+        return `${base.name} / ${relCol?.name || '?'} → ${tTable?.name || '?'} / ${tCol?.name || '?'}`;
+    });
+
+    const head = `<tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`;
+    const rows = (base.rows || []).map(row => {
+        const cells = selected.map(key => {
+            if (key.startsWith('base:')) {
+                const col = getColumnById(base, key.split(':')[1]);
+                const value = row.values?.[col?.id] ?? '';
+                return `<td>${escapeHtml(displayValue(col, value))}</td>`;
+            }
+
+            const [, relColId, targetColId] = key.split(':');
+            const relCol = getColumnById(base, relColId);
+            const tTable = getTableById(relCol?.relation?.tableId);
+            const linkedRow = (tTable?.rows || []).find(r => r.id === (row.values?.[relColId] ?? ''));
+            const value = linkedRow?.values?.[targetColId] ?? '';
+            return `<td>${escapeHtml(String(value))}</td>`;
+        }).join('');
+        return `<tr>${cells}</tr>`;
     }).join('');
+
+    mergeTable.innerHTML = `<thead>${head}</thead><tbody>${rows || `<tr><td colspan="${selected.length}">No records yet.</td></tr>`}</tbody>`;
 }
 
 function renderAll() {
-    renderTablesList();
-    renderColumns();
-    renderRelations();
+    renderTableList();
+    renderFieldsAndRecords();
+    renderMergeControls();
 }
 
 function escapeHtml(value) {
@@ -246,7 +330,7 @@ tableList.addEventListener('click', async event => {
 
     const rename = event.target.closest('[data-rename-table]');
     if (rename) {
-        const table = state.tables.find(t => t.id === rename.dataset.renameTable);
+        const table = getTableById(rename.dataset.renameTable);
         if (!table) return;
         const next = prompt('New group name:', table.name);
         if (!next) return;
@@ -260,10 +344,21 @@ tableList.addEventListener('click', async event => {
     if (del) {
         const tableId = del.dataset.deleteTable;
         state.tables = state.tables.filter(t => t.id !== tableId);
-        state.relations = state.relations.filter(r => r.fromTableId !== tableId && r.toTableId !== tableId);
-        if (state.selectedTableId === tableId) {
-            state.selectedTableId = state.tables[0]?.id || null;
+
+        for (const table of state.tables) {
+            table.columns = (table.columns || []).filter(col => !(col.type === 'relation' && col.relation?.tableId === tableId));
+            table.rows = (table.rows || []).map(row => {
+                const values = { ...(row.values || {}) };
+                for (const col of table.columns || []) {
+                    if (col.type === 'relation' && col.relation?.tableId === tableId) {
+                        delete values[col.id];
+                    }
+                }
+                return { ...row, values };
+            });
         }
+
+        if (state.selectedTableId === tableId) state.selectedTableId = state.tables[0]?.id || null;
         renderAll();
         await persist();
     }
@@ -279,17 +374,23 @@ addColumnBtn.addEventListener('click', async () => {
 
     if (type === 'dropdown') {
         const options = parseDropdownOptions(dropdownOptionsInput.value);
-        if (options.length === 0) {
-            alert('Please add at least one dropdown choice (comma-separated).');
-            return;
-        }
+        if (!options.length) return alert('Please add at least one dropdown choice.');
         column.options = options;
+    }
+
+    if (type === 'relation') {
+        if (!relationTableInput.value || !relationColumnInput.value) {
+            return alert('Please choose the linked group and field.');
+        }
+        column.relation = { tableId: relationTableInput.value, columnId: relationColumnInput.value };
     }
 
     table.columns.push(column);
     columnNameInput.value = '';
     dropdownOptionsInput.value = '';
-    syncDropdownUi();
+    relationTableInput.value = '';
+    relationColumnInput.innerHTML = '<option value="">Select field</option>';
+    syncTypeUi();
     renderAll();
     await persist();
 });
@@ -308,7 +409,6 @@ columnList.addEventListener('click', async event => {
         return { ...row, values };
     });
 
-    state.relations = state.relations.filter(r => r.fromColumnId !== colId && r.toColumnId !== colId);
     renderAll();
     await persist();
 });
@@ -320,9 +420,7 @@ rowForm.addEventListener('submit', async event => {
 
     const formData = new FormData(rowForm);
     const values = {};
-    for (const col of table.columns) {
-        values[col.id] = String(formData.get(col.id) ?? '');
-    }
+    for (const col of table.columns) values[col.id] = String(formData.get(col.id) ?? '');
 
     table.rows.push({ id: uid('row'), values });
     renderAll();
@@ -332,49 +430,22 @@ rowForm.addEventListener('submit', async event => {
 dataTable.addEventListener('click', async event => {
     const del = event.target.closest('[data-delete-row]');
     if (!del) return;
-
     const table = selectedTable();
     if (!table) return;
-    const rowId = del.dataset.deleteRow;
-    table.rows = table.rows.filter(r => r.id !== rowId);
+
+    table.rows = table.rows.filter(r => r.id !== del.dataset.deleteRow);
     renderAll();
     await persist();
 });
 
-[fromTable, toTable].forEach(select => {
-    select.addEventListener('change', () => {
-        renderRelations();
-    });
+columnTypeInput.addEventListener('change', syncTypeUi);
+relationTableInput.addEventListener('change', () => {
+    relationColumnInput.innerHTML = relationColumnOptions(relationTableInput.value);
 });
 
-addRelationBtn.addEventListener('click', async () => {
-    if (!fromTable.value || !toTable.value || !fromColumn.value || !toColumn.value) {
-        return;
-    }
+mergeBaseTable.addEventListener('change', renderMergeColumns);
+refreshMergeColumnsBtn.addEventListener('click', renderMergeColumns);
+renderMergeBtn.addEventListener('click', renderMergedTable);
 
-    state.relations.push({
-        id: uid('rel'),
-        fromTableId: fromTable.value,
-        fromColumnId: fromColumn.value,
-        toTableId: toTable.value,
-        toColumnId: toColumn.value,
-        label: relationLabel.value.trim(),
-    });
-
-    relationLabel.value = '';
-    renderAll();
-    await persist();
-});
-
-relationList.addEventListener('click', async event => {
-    const del = event.target.closest('[data-delete-relation]');
-    if (!del) return;
-    const id = del.dataset.deleteRelation;
-    state.relations = state.relations.filter(r => r.id !== id);
-    renderAll();
-    await persist();
-});
-
-columnTypeInput.addEventListener('change', syncDropdownUi);
-syncDropdownUi();
+syncTypeUi();
 loadWorkspace();

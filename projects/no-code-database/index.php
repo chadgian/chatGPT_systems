@@ -73,61 +73,72 @@ if (isset($_GET['api']) && $_GET['api'] === '1') {
         <div class="badge" id="saveState">Ready</div>
     </header>
 
-    <section class="grid">
-        <aside class="card">
-            <h2>1) Data groups</h2>
+    <section class="grid split-top">
+        <section class="card">
+            <h2>1) Create data group</h2>
             <div class="row">
                 <input id="tableNameInput" type="text" placeholder="Example: Customers">
                 <button id="addTableBtn">Add group</button>
             </div>
+            <p class="muted">Use this section only for creating a new group.</p>
+        </section>
+
+        <aside class="card">
+            <h2>2) Select and manage group</h2>
             <ul id="tableList" class="list"></ul>
         </aside>
-
-        <section class="card">
-            <h2>2) Fields & records</h2>
-            <p id="selectedTableLabel" class="muted">Pick a data group to start.</p>
-
-            <div class="row">
-                <input id="columnNameInput" type="text" placeholder="Field name (Example: Email)">
-                <select id="columnTypeInput">
-                    <option value="text">Text</option>
-                    <option value="number">Number</option>
-                    <option value="date">Date</option>
-                    <option value="yesno">Yes / No</option>
-                    <option value="dropdown">Dropdown list</option>
-                </select>
-                <button id="addColumnBtn">Add field</button>
-            </div>
-            <div class="row" id="dropdownOptionsRow" style="display:none;">
-                <input id="dropdownOptionsInput" type="text" placeholder="Dropdown choices (comma-separated, example: New, Processing, Done)">
-            </div>
-
-            <h3>Fields</h3>
-            <ul id="columnList" class="list"></ul>
-
-            <h3>Add a record</h3>
-            <form id="rowForm" class="row-form"></form>
-
-            <h3>Saved records</h3>
-            <div class="table-wrap">
-                <table id="dataTable"></table>
-            </div>
-        </section>
     </section>
 
     <section class="card">
-        <h2>3) Connections between groups</h2>
-        <p class="muted">Connect one field from a group to a field in another group.</p>
-        <div class="relation-builder">
-            <select id="fromTable"></select>
-            <select id="fromColumn"></select>
-            <span>connects to</span>
-            <select id="toTable"></select>
-            <select id="toColumn"></select>
-            <input id="relationLabel" type="text" placeholder="Connection name (optional)">
-            <button id="addRelationBtn">Add connection</button>
+        <h2>3) Fields & records</h2>
+        <p id="selectedTableLabel" class="muted">Pick a data group to start.</p>
+
+        <div class="row wrap-row">
+            <input id="columnNameInput" type="text" placeholder="Field name (Example: Email)">
+            <select id="columnTypeInput">
+                <option value="text">Text</option>
+                <option value="number">Number</option>
+                <option value="date">Date</option>
+                <option value="yesno">Yes / No</option>
+                <option value="dropdown">Dropdown list</option>
+                <option value="relation">Linked record (relation)</option>
+            </select>
+            <button id="addColumnBtn">Add field</button>
         </div>
-        <ul id="relationList" class="list"></ul>
+
+        <div class="row" id="dropdownOptionsRow" style="display:none;">
+            <input id="dropdownOptionsInput" type="text" placeholder="Dropdown choices (comma-separated, example: New, Processing, Done)">
+        </div>
+
+        <div class="row wrap-row" id="relationOptionsRow" style="display:none;">
+            <select id="relationTableInput"></select>
+            <select id="relationColumnInput"></select>
+        </div>
+
+        <h3>Fields</h3>
+        <ul id="columnList" class="list"></ul>
+
+        <h3>Add a record</h3>
+        <form id="rowForm" class="row-form"></form>
+
+        <h3>Saved records</h3>
+        <div class="table-wrap">
+            <table id="dataTable"></table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>4) Combined view (with linked data)</h2>
+        <p class="muted">Choose a main group, pick which columns to show, then preview merged data.</p>
+        <div class="row wrap-row">
+            <select id="mergeBaseTable"></select>
+            <button id="refreshMergeColumnsBtn" class="ghost">Refresh columns</button>
+            <button id="renderMergeBtn">Show merged data</button>
+        </div>
+        <div id="mergeColumns" class="merge-columns"></div>
+        <div class="table-wrap">
+            <table id="mergeTable"></table>
+        </div>
     </section>
 </main>
 <script src="script.js"></script>
