@@ -1,0 +1,165 @@
+{
+    "tables": [
+        {
+            "id": "table_druj8a5",
+            "name": "Agency",
+            "columns": [
+                {
+                    "id": "col_8lfebkc",
+                    "name": "Agency Name",
+                    "type": "text"
+                },
+                {
+                    "id": "col_6no5kgi",
+                    "name": "Province",
+                    "type": "dropdown",
+                    "options": [
+                        "Aklan",
+                        "Antique",
+                        "Capiz",
+                        "Guimaras",
+                        "Iloilo",
+                        "Negros Occidental"
+                    ]
+                },
+                {
+                    "id": "col_rrhj4ya",
+                    "name": "Agency Type",
+                    "type": "dropdown",
+                    "options": [
+                        "NGA",
+                        "GOCC",
+                        "LGU",
+                        "SUC\/LUC"
+                    ]
+                }
+            ],
+            "rows": [
+                {
+                    "id": "row_f4towie",
+                    "values": {
+                        "col_8lfebkc": "Civil Service Commission Regional Office VI",
+                        "col_6no5kgi": "Iloilo",
+                        "col_rrhj4ya": "NGA"
+                    }
+                }
+            ]
+        },
+        {
+            "id": "table_rw11e4q",
+            "name": "Employee",
+            "columns": [
+                {
+                    "id": "col_sgzlqr7",
+                    "name": "Name",
+                    "type": "text"
+                },
+                {
+                    "id": "col_v1bbzcx",
+                    "name": "Agency",
+                    "type": "relation",
+                    "relation": {
+                        "tableId": "table_druj8a5",
+                        "columnId": "col_8lfebkc"
+                    }
+                },
+                {
+                    "id": "col_fqent8y",
+                    "name": "Position",
+                    "type": "text"
+                }
+            ],
+            "rows": [
+                {
+                    "id": "row_ygq72wi",
+                    "values": {
+                        "col_sgzlqr7": "Chad Gian",
+                        "col_v1bbzcx": "row_f4towie",
+                        "col_fqent8y": "COS Personnel"
+                    }
+                }
+            ]
+        },
+        {
+            "id": "table_e08j15k",
+            "name": "Training",
+            "columns": [
+                {
+                    "id": "col_0cm34m2",
+                    "name": "Training Name",
+                    "type": "text"
+                },
+                {
+                    "id": "col_j4ud4de",
+                    "name": "Training Type",
+                    "type": "dropdown",
+                    "options": [
+                        "Technical",
+                        "Leadership and Management"
+                    ]
+                },
+                {
+                    "id": "col_9icqgtn",
+                    "name": "Training Date",
+                    "type": "date"
+                }
+            ],
+            "rows": [
+                {
+                    "id": "row_lxdanv9",
+                    "values": {
+                        "col_0cm34m2": "Training 1",
+                        "col_j4ud4de": "Leadership and Management",
+                        "col_9icqgtn": "2026-02-12"
+                    }
+                }
+            ]
+        },
+        {
+            "id": "table_0baiu3c",
+            "name": "Training Participants",
+            "columns": [
+                {
+                    "id": "col_sbpw9ys",
+                    "name": "Training Pax",
+                    "type": "relation",
+                    "relation": {
+                        "tableId": "table_rw11e4q",
+                        "columnId": "col_sgzlqr7"
+                    }
+                },
+                {
+                    "id": "col_gmg7c1v",
+                    "name": "Training",
+                    "type": "relation",
+                    "relation": {
+                        "tableId": "table_e08j15k",
+                        "columnId": "col_0cm34m2"
+                    }
+                },
+                {
+                    "id": "col_u7xjg23",
+                    "name": "Status",
+                    "type": "dropdown",
+                    "options": [
+                        "Registered",
+                        "Completed",
+                        "Unpaid"
+                    ]
+                }
+            ],
+            "rows": [
+                {
+                    "id": "row_bcgyv0p",
+                    "values": {
+                        "col_sbpw9ys": "row_ygq72wi",
+                        "col_gmg7c1v": "row_lxdanv9",
+                        "col_u7xjg23": "Completed"
+                    }
+                }
+            ]
+        }
+    ],
+    "relations": [],
+    "updated_at": "2026-02-13T08:10:00+01:00"
+}
